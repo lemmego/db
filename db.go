@@ -102,10 +102,14 @@ func (m *DatabaseManager) Add(name string, conn *Connection) {
 }
 
 // Get retrieves a database connection from the manager
-func (m *DatabaseManager) Get(name string) (*Connection, bool) {
+func (m *DatabaseManager) Get(name ...string) (*Connection, bool) {
+	connName := "default"
+	if len(name) > 0 {
+		connName = name[0]
+	}
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	conn, found := m.connections[name]
+	conn, found := m.connections[connName]
 	return conn, found
 }
 
