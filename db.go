@@ -47,14 +47,18 @@ func NewConnection(config *Config) *Connection {
 func (c *Connection) Open() *sql.DB {
 	switch c.Config.Driver {
 	case DialectSQLite:
-		return NewSQLiteConnection(c.Config).Connect()
+		c.DB = NewSQLiteConnection(c.Config).Connect()
 	case DialectMySQL:
-		return NewMySQLConnection(c.Config).Connect()
+		c.DB = NewMySQLConnection(c.Config).Connect()
 	case DialectPgSQL:
-		return NewPgSQLConnection(c.Config).Connect()
+		c.DB = NewPgSQLConnection(c.Config).Connect()
 	}
 
-	panic("unsupported driver")
+	if c.DB == nil {
+		panic("unsupported driver")
+	}
+
+	return c.DB
 }
 
 func (c *Config) DataSource() *DataSource {
