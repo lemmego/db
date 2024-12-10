@@ -74,15 +74,13 @@ func TestQueryBuilder(t *testing.T) {
 
 	// Test QueryBuilder methods
 	// Test SELECT
-	qb1 := Table("users")
-	user, err := qb1.Where("name", "Alice").First()
+	user, err := Table("users").Where("name", "Alice").First()
 	if err != nil || user["name"] != "Alice" {
 		t.Errorf("Failed to fetch user: %v", err)
 	}
 
 	// Test WHERE with multiple conditions
-	qb2 := Table("users")
-	users, err := qb2.WhereMap(map[string]interface{}{
+	users, err := Table("users").WhereMap(map[string]interface{}{
 		"name": "Alice",
 		"age":  30,
 	}).Get()
@@ -91,36 +89,31 @@ func TestQueryBuilder(t *testing.T) {
 	}
 
 	// Test INSERT
-	qb3 := Table("users")
-	result, err := qb3.Insert([]map[string]interface{}{{"name": "Bob", "age": 25}})
+	result, err := Table("users").Insert([]map[string]interface{}{{"name": "Bob", "age": 25}})
 	if err != nil || result == nil {
 		t.Errorf("Insert operation failed: %v", err)
 	}
 
 	// Test UPDATE
-	qb4 := Table("users")
-	result, err = qb4.Where("name", "Bob").Update(map[string]interface{}{"age": 26})
+	result, err = Table("users").Where("name", "Bob").Update(map[string]interface{}{"age": 26})
 	if err != nil || result == nil {
 		t.Errorf("Update operation failed: %v", err)
 	}
 
 	// Test DELETE
-	qb5 := Table("users")
-	result, err = qb5.Where("name", "Bob").Delete()
+	result, err = Table("users").Where("name", "Bob").Delete()
 	if err != nil || result == nil {
 		t.Errorf("Delete operation failed: %v", err)
 	}
 
 	// Test COUNT
-	qb6 := Table("users")
-	count, err := qb6.Count()
+	count, err := Table("users").Count()
 	if err != nil || count != 1 {
 		t.Errorf("Count operation failed or returned wrong count: %v", err)
 	}
 
 	// Test EXISTS
-	qb7 := Table("users")
-	exists, err := qb7.Where("name", "Alice").Exists()
+	exists, err := Table("users").Where("name", "Alice").Exists()
 	if err != nil || !exists {
 		t.Errorf("Exists check failed: %v", err)
 	}
@@ -128,8 +121,7 @@ func TestQueryBuilder(t *testing.T) {
 	// Test MAX, AVG would be similar but with appropriate data for numeric columns
 
 	// Test TRUNCATE
-	qb8 := Table("users")
-	err = qb8.Truncate()
+	err = Table("users").Truncate()
 	if err != nil {
 		t.Errorf("Truncate operation failed: %v", err)
 	}
@@ -178,15 +170,13 @@ func TestQueryBuilderGroupBy(t *testing.T) {
 	}
 
 	// Test GROUP BY with COUNT
-	qb := Table("products").GroupBy("category")
-	results, err := qb.Get()
+	results, err := Table("products").GroupBy("category").Get()
 	if err != nil || len(results) != 2 {
 		t.Errorf("Failed to group by category: %v", err)
 	}
 
 	// Test HAVING clause
-	qb = Table("products").GroupBy("category").Having("SUM(price)", ">", 1000)
-	results, err = qb.Get()
+	results, err = Table("products").GroupBy("category").Having("SUM(price)", ">", 1000).Get()
 	if err != nil || len(results) != 1 {
 		t.Errorf("Failed to apply HAVING clause: %v", err)
 	}
@@ -221,15 +211,13 @@ func TestQueryBuilderOrderBy(t *testing.T) {
 	}
 
 	// Test ORDER BY
-	qb := Table("users").OrderBy("name ASC")
-	users, err := qb.Get()
+	users, err := Table("users").OrderBy("name ASC").Get()
 	if err != nil || len(users) != 3 || users[0]["name"].(string) != "Adam" {
 		t.Errorf("Failed to order by name: %v", err)
 	}
 
 	// Test ORDER BY DESC
-	qb = Table("users").OrderBy("name DESC")
-	users, err = qb.Get()
+	users, err = Table("users").OrderBy("name DESC").Get()
 	if err != nil || len(users) != 3 || users[0]["name"].(string) != "Zoe" {
 		t.Errorf("Failed to order by name descending: %v", err)
 	}
@@ -258,8 +246,7 @@ func TestQueryBuilderDistinct(t *testing.T) {
 	}
 
 	// Test DISTINCT
-	qb := Table("items").Distinct().Select("color")
-	colors, err := qb.Get()
+	colors, err := Table("items").Distinct().Select("color").Get()
 	if err != nil || len(colors) != 3 {
 		t.Errorf("Failed to select distinct colors: %v", err)
 	}
@@ -333,8 +320,7 @@ func TestQueryBuilderValue(t *testing.T) {
 		t.Fatalf("Could not insert data: %v", err)
 	}
 
-	qb := Table("prices")
-	prices, err := qb.Value("amount")
+	prices, err := Table("prices").Value("amount")
 	if err != nil || len(prices) != 2 {
 		t.Errorf("Failed to select values: %v", err)
 	}
