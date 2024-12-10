@@ -232,7 +232,9 @@ func (qb *QueryBuilder) Avg(column string) (float64, error) {
 
 // Exists checks if any rows match the conditions
 func (qb *QueryBuilder) Exists() (bool, error) {
-	count, err := qb.Count()
+	query := "SELECT COUNT(*) FROM " + qb.table + qb.buildWhereClause()
+	var count int
+	err := qb.db.QueryRowContext(context.Background(), query, qb.getConditionValues()...).Scan(&count)
 	return count > 0, err
 }
 

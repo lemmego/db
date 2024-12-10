@@ -119,8 +119,8 @@ func (m *DatabaseManager) Get(name ...string) (*Connection, bool) {
 
 // Remove closes and removes a database connection from the manager
 func (m *DatabaseManager) Remove(name string) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
 	conn, ok := m.Get(name)
 	if !ok {
 		return errors.New(fmt.Sprintf("database: not found %s", name))
