@@ -239,7 +239,11 @@ func TestQueryBuilderGroupBy(t *testing.T) {
 	}
 
 	// Insert sample data
-	_, err = db.Exec("INSERT INTO products (category, price) VALUES ('Electronics', 1000), ('Electronics', 1500), ('Books', 50)")
+	_, err = Table("products").Insert([]map[string]interface{}{
+		{"category": "Electronics", "price": 1000},
+		{"category": "Electronics", "price": 1500},
+		{"category": "Books", "price": 50},
+	})
 	if err != nil {
 		t.Fatalf("Could not insert data: %v", err)
 	}
@@ -261,19 +265,17 @@ func TestQueryBuilderOrderBy(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	defer db.Close()
 
-	// Drop table if it exists to avoid conflicts
-	_, err := db.Exec("DROP TABLE IF EXISTS users")
-	if err != nil {
-		t.Fatalf("Could not drop table: %v", err)
-	}
-
-	_, err = db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
 	if err != nil {
 		t.Fatalf("Could not create table: %v", err)
 	}
 
 	// Insert sample data
-	_, err = db.Exec("INSERT INTO users (name) VALUES ('Zoe'), ('Adam'), ('Eve')")
+	_, err = Table("users").Insert([]map[string]interface{}{
+		{"name": "Zoe"},
+		{"name": "Adam"},
+		{"name": "Eve"},
+	})
 	if err != nil {
 		t.Fatalf("Could not insert data: %v", err)
 	}
@@ -301,7 +303,12 @@ func TestQueryBuilderDistinct(t *testing.T) {
 	}
 
 	// Insert sample data
-	_, err = db.Exec("INSERT INTO items (color) VALUES ('red'), ('blue'), ('red'), ('green')")
+	_, err = Table("items").Insert([]map[string]interface{}{
+		{"color": "red"},
+		{"color": "blue"},
+		{"color": "red"},
+		{"color": "green"},
+	})
 	if err != nil {
 		t.Fatalf("Could not insert data: %v", err)
 	}
@@ -317,12 +324,7 @@ func TestQueryBuilderUpdateOrInsert(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	defer db.Close()
 
-	// Drop and recreate table to ensure a clean state
-	_, err := db.Exec("DROP TABLE IF EXISTS inventory")
-	if err != nil {
-		t.Fatalf("Could not drop table: %v", err)
-	}
-	_, err = db.Exec("CREATE TABLE inventory (id INTEGER PRIMARY KEY, item TEXT, quantity INTEGER)")
+	_, err := db.Exec("CREATE TABLE inventory (id INTEGER PRIMARY KEY, item TEXT, quantity INTEGER)")
 	if err != nil {
 		t.Fatalf("Could not create table: %v", err)
 	}
@@ -362,7 +364,7 @@ func TestQueryBuilderValue(t *testing.T) {
 		t.Fatalf("Could not create table: %v", err)
 	}
 
-	_, err = db.Exec("INSERT INTO prices (amount) VALUES (100.5), (200.0)")
+	_, err = Table("prices").Insert([]map[string]interface{}{{"amount": 100.5}, {"amount": 200.0}})
 	if err != nil {
 		t.Fatalf("Could not insert data: %v", err)
 	}
