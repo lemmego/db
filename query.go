@@ -13,6 +13,7 @@ type Cond struct {
 	Column   string
 	Operator string
 	Value    interface{}
+	Logical  string
 }
 
 type Join struct {
@@ -80,32 +81,46 @@ func Table(table string, connName ...string) *QueryBuilder {
 
 // Where adds a condition to the WHERE clause with '=' operator by default
 func (qb *QueryBuilder) Where(column string, value interface{}) *QueryBuilder {
-	qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value})
+	qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value, Logical: "AND"})
 	return qb
 }
 
 // WhereMap adds multiple conditions to the WHERE clause using '=' operator for all
 func (qb *QueryBuilder) WhereMap(conditions map[string]interface{}) *QueryBuilder {
 	for column, value := range conditions {
-		qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value})
+		qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value, Logical: "AND"})
 	}
 	return qb
 }
 
 // WhereConds adds multiple conditions to the WHERE clause
 func (qb *QueryBuilder) WhereConds(conds []*Cond) *QueryBuilder {
+	for _, cond := range conds {
+		cond.Logical = "AND"
+	}
 	qb.conditions = append(qb.conditions, conds...)
 	return qb
 }
 
 // OrWhere adds a condition to the WHERE clause with 'OR' operator
 func (qb *QueryBuilder) OrWhere(column, operator string, value interface{}) *QueryBuilder {
-	qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: operator, Value: value})
+	qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: operator, Value: value, Logical: "OR"})
+	return qb
+}
+
+// OrWhereMap adds multiple conditions to the WHERE clause using 'OR' operator for all
+func (qb *QueryBuilder) OrWhereMap(conditions map[string]interface{}) *QueryBuilder {
+	for column, value := range conditions {
+		qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value, Logical: "OR"})
+	}
 	return qb
 }
 
 // OrWhereConds adds multiple conditions to the WHERE clause with 'OR' operator
 func (qb *QueryBuilder) OrWhereConds(conds []*Cond) *QueryBuilder {
+	for _, cond := range conds {
+		cond.Logical = "OR"
+	}
 	qb.conditions = append(qb.conditions, conds...)
 	return qb
 }
@@ -332,7 +347,7 @@ func (qb *QueryBuilder) buildWhereClause() string {
 	clause := " WHERE "
 	for i, cond := range qb.conditions {
 		if i > 0 {
-			clause += " AND "
+			clause += " " + cond.Logical + " "
 		}
 		clause += cond.Column + " " + cond.Operator + " ?"
 	}
