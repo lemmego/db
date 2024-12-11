@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"fmt"
 	"testing"
 	"time"
 
@@ -437,7 +436,6 @@ func TestQueryBuilderOrWhere(t *testing.T) {
 	}
 
 	if len(rows) != 3 {
-		fmt.Println(rows)
 		t.Errorf("Expected 3 rows but got %d", len(rows))
 	}
 }
@@ -470,7 +468,6 @@ func TestQueryBuilderOrWhereConds(t *testing.T) {
 	}
 
 	if len(rows) != 3 {
-		fmt.Println(rows)
 		t.Errorf("Expected 3 rows but got %d", len(rows))
 	}
 }
