@@ -477,3 +477,42 @@ func TestQueryBuilderOrWhereConds(t *testing.T) {
 		t.Errorf("Expected 4 rows but got %d", len(rows))
 	}
 }
+
+func TestQueryBuilderOrWhereMap(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = Table("users").Insert([]map[string]interface{}{
+		{"name": "Alice", "email": "a5lYH@msn.com", "age": 25},
+		{"name": "Bob", "email": "2x2Ht@yahoo.com", "age": 30},
+		{"name": "Charlie", "email": "a5lYH@gmail.com", "age": 35},
+		{"name": "David", "email": "2x2Ht@msn.com", "age": 40},
+	})
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	rows, err := Table("users").
+		WhereConds([]*Cond{{"email", "LIKE", "%msn.com"}}).
+		OrWhereMap(map[string]interface{}{
+			"age":  30,
+			"name": "Bob",
+		}).
+		Get()
+	if err != nil {
+		t.Errorf("Failed to execute: %v", err)
+	}
+
+	// We expect 3 rows because:
+	// - 2 users have emails ending in 'msn.com'
+	// - 1 user (Bob) matches the name condition
+	// - 1 user (age 30) matches the age condition, but he's already counted in the name condition
+	if len(rows) != 3 {
+		t.Errorf("Expected 3 rows but got %d", len(rows))
+	}
+}
