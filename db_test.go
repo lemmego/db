@@ -1,11 +1,32 @@
 package db
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
+
+func setupDb(dialect string) *sql.DB {
+	var config *Config
+	switch dialect {
+	case DialectSQLite:
+		config = &Config{
+			ConnName: "default",
+			Driver:   DialectSQLite,
+			Database: ":memory:",
+			Params:   "cache=shared",
+		}
+	case DialectMySQL, DialectPgSQL:
+		config = &Config{} // Not implemented yet
+	}
+
+	conn := NewConnection(config)
+	db := conn.Open()
+	DM().Add(config.ConnName, conn)
+	return db
+}
 
 func TestDatabaseManager(t *testing.T) {
 	// Create a new SQLite connection for testing
@@ -50,15 +71,7 @@ func TestDatabaseManager(t *testing.T) {
 
 func TestQueryBuilder(t *testing.T) {
 	// Setup SQLite in-memory database
-	config := &Config{
-		ConnName: "default",
-		Driver:   DialectSQLite,
-		Database: ":memory:",
-		Params:   "cache=shared",
-	}
-	conn := NewConnection(config)
-	db := conn.Open()
-	DM().Add(config.ConnName, conn)
+	db := setupDb(DialectSQLite)
 
 	// Create a test table
 	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, created_at DATETIME)")
@@ -148,15 +161,7 @@ func TestDSNGeneration(t *testing.T) {
 }
 
 func TestQueryBuilderGroupBy(t *testing.T) {
-	config := &Config{
-		ConnName: "default",
-		Driver:   DialectSQLite,
-		Database: ":memory:",
-		Params:   "cache=shared",
-	}
-	conn := NewConnection(config)
-	db := conn.Open()
-	DM().Add(config.ConnName, conn)
+	db := setupDb(DialectSQLite)
 
 	_, err := db.Exec("CREATE TABLE products (id INTEGER PRIMARY KEY, category TEXT, price REAL)")
 	if err != nil {
@@ -183,15 +188,7 @@ func TestQueryBuilderGroupBy(t *testing.T) {
 }
 
 func TestQueryBuilderOrderBy(t *testing.T) {
-	config := &Config{
-		ConnName: "default",
-		Driver:   DialectSQLite,
-		Database: ":memory:",
-		Params:   "cache=shared",
-	}
-	conn := NewConnection(config)
-	db := conn.Open()
-	DM().Add(config.ConnName, conn)
+	db := setupDb(DialectSQLite)
 
 	// Drop table if it exists to avoid conflicts
 	_, err := db.Exec("DROP TABLE IF EXISTS users")
@@ -224,15 +221,7 @@ func TestQueryBuilderOrderBy(t *testing.T) {
 }
 
 func TestQueryBuilderDistinct(t *testing.T) {
-	config := &Config{
-		ConnName: "default",
-		Driver:   DialectSQLite,
-		Database: ":memory:",
-		Params:   "cache=shared",
-	}
-	conn := NewConnection(config)
-	db := conn.Open()
-	DM().Add(config.ConnName, conn)
+	db := setupDb(DialectSQLite)
 
 	_, err := db.Exec("CREATE TABLE items (id INTEGER PRIMARY KEY, color TEXT)")
 	if err != nil {
@@ -253,15 +242,7 @@ func TestQueryBuilderDistinct(t *testing.T) {
 }
 
 func TestQueryBuilderUpdateOrInsert(t *testing.T) {
-	config := &Config{
-		ConnName: "default",
-		Driver:   DialectSQLite,
-		Database: ":memory:",
-		Params:   "cache=shared",
-	}
-	conn := NewConnection(config)
-	db := conn.Open()
-	DM().Add(config.ConnName, conn)
+	db := setupDb(DialectSQLite)
 
 	// Drop and recreate table to ensure a clean state
 	_, err := db.Exec("DROP TABLE IF EXISTS inventory")
@@ -300,15 +281,7 @@ func TestQueryBuilderUpdateOrInsert(t *testing.T) {
 }
 
 func TestQueryBuilderValue(t *testing.T) {
-	config := &Config{
-		ConnName: "default",
-		Driver:   DialectSQLite,
-		Database: ":memory:",
-		Params:   "cache=shared",
-	}
-	conn := NewConnection(config)
-	db := conn.Open()
-	DM().Add(config.ConnName, conn)
+	db := setupDb(DialectSQLite)
 
 	_, err := db.Exec("CREATE TABLE prices (id INTEGER PRIMARY KEY, amount REAL)")
 	if err != nil {
