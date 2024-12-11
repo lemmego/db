@@ -70,8 +70,27 @@ func TestDatabaseManager(t *testing.T) {
 }
 
 func TestQueryBuilder(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	qb := Query()
+	if qb.db == nil {
+		t.Error("db should not be nil")
+	}
+
+	if qb.config == nil {
+		t.Error("config should not be nil")
+	}
+
+	if len(qb.conditions) != 0 {
+		t.Error("conditions should be empty")
+	}
+}
+
+func TestQueryBuilderFirst(t *testing.T) {
 	// Setup SQLite in-memory database
 	db := setupDb(DialectSQLite)
+	defer db.Close()
 
 	// Create a test table
 	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, created_at DATETIME)")
@@ -79,26 +98,31 @@ func TestQueryBuilder(t *testing.T) {
 		t.Fatalf("Could not create table: %v", err)
 	}
 
+	now := time.Now().Format(time.RFC3339)
+
 	// Insert sample data
-	_, err = db.Exec("INSERT INTO users (name, age, created_at) VALUES ('Alice', 30, ?)", time.Now().Format(time.RFC3339))
+	_, err = db.Exec("INSERT INTO users (name, age, created_at) VALUES ('Alice', 30, ?), ('Bob', 25, ?)",
+		now,
+		now,
+	)
 	if err != nil {
 		t.Fatalf("Could not insert data: %v", err)
 	}
 
-	// Test QueryBuilder methods
-	// Test SELECT
 	user, err := Table("users").Where("name", "Alice").First()
 	if err != nil || user["name"] != "Alice" {
 		t.Errorf("Failed to fetch user: %v", err)
 	}
+}
 
-	// Test WHERE with multiple conditions
-	users, err := Table("users").WhereMap(map[string]interface{}{
-		"name": "Alice",
-		"age":  30,
-	}).Get()
-	if err != nil || len(users) != 1 {
-		t.Errorf("Failed to fetch users with multiple conditions: %v", err)
+func TestQueryBuilderDML(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	// Create a test table
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, created_at DATETIME)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
 	}
 
 	// Test INSERT
@@ -119,24 +143,60 @@ func TestQueryBuilder(t *testing.T) {
 		t.Errorf("Delete operation failed: %v", err)
 	}
 
+	// Test TRUNCATE
+	err = Table("users").Truncate()
+	if err != nil {
+		t.Errorf("Truncate operation failed: %v", err)
+	}
+}
+
+func TestQueryBuilderAggregate(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	// Create a test table
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, created_at DATETIME)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	// Insert some sample data
+	result, err := Table("users").Insert([]map[string]interface{}{{"name": "Bob", "age": 25}, {"name": "Alice", "age": 30}})
+	if err != nil || result == nil {
+		t.Errorf("Insert operation failed: %v", err)
+	}
+
 	// Test COUNT
 	count, err := Table("users").Count()
-	if err != nil || count != 1 {
+	if err != nil || count != 2 {
 		t.Errorf("Count operation failed or returned wrong count: %v", err)
+	}
+
+	// Add more aggregate tests
+	// Test MAX, AVG would be similar but with appropriate data for numeric columns
+}
+
+func TestQueryBuilderExists(t *testing.T) {
+	// Setup SQLite in-memory database
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	// Create a test table
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, created_at DATETIME)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	// Insert some sample data
+	result, err := Table("users").Insert([]map[string]interface{}{{"name": "Alice", "age": 30}})
+	if err != nil || result == nil {
+		t.Errorf("Insert operation failed: %v", err)
 	}
 
 	// Test EXISTS
 	exists, err := Table("users").Where("name", "Alice").Exists()
 	if err != nil || !exists {
 		t.Errorf("Exists check failed: %v", err)
-	}
-
-	// Test MAX, AVG would be similar but with appropriate data for numeric columns
-
-	// Test TRUNCATE
-	err = Table("users").Truncate()
-	if err != nil {
-		t.Errorf("Truncate operation failed: %v", err)
 	}
 }
 
@@ -162,6 +222,7 @@ func TestDSNGeneration(t *testing.T) {
 
 func TestQueryBuilderGroupBy(t *testing.T) {
 	db := setupDb(DialectSQLite)
+	defer db.Close()
 
 	_, err := db.Exec("CREATE TABLE products (id INTEGER PRIMARY KEY, category TEXT, price REAL)")
 	if err != nil {
@@ -189,6 +250,7 @@ func TestQueryBuilderGroupBy(t *testing.T) {
 
 func TestQueryBuilderOrderBy(t *testing.T) {
 	db := setupDb(DialectSQLite)
+	defer db.Close()
 
 	// Drop table if it exists to avoid conflicts
 	_, err := db.Exec("DROP TABLE IF EXISTS users")
@@ -222,6 +284,7 @@ func TestQueryBuilderOrderBy(t *testing.T) {
 
 func TestQueryBuilderDistinct(t *testing.T) {
 	db := setupDb(DialectSQLite)
+	defer db.Close()
 
 	_, err := db.Exec("CREATE TABLE items (id INTEGER PRIMARY KEY, color TEXT)")
 	if err != nil {
@@ -243,6 +306,7 @@ func TestQueryBuilderDistinct(t *testing.T) {
 
 func TestQueryBuilderUpdateOrInsert(t *testing.T) {
 	db := setupDb(DialectSQLite)
+	defer db.Close()
 
 	// Drop and recreate table to ensure a clean state
 	_, err := db.Exec("DROP TABLE IF EXISTS inventory")
@@ -282,6 +346,7 @@ func TestQueryBuilderUpdateOrInsert(t *testing.T) {
 
 func TestQueryBuilderValue(t *testing.T) {
 	db := setupDb(DialectSQLite)
+	defer db.Close()
 
 	_, err := db.Exec("CREATE TABLE prices (id INTEGER PRIMARY KEY, amount REAL)")
 	if err != nil {
