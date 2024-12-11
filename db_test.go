@@ -374,3 +374,36 @@ func TestQueryBuilderValue(t *testing.T) {
 		t.Errorf("Failed to select values: %v", err)
 	}
 }
+
+func TestQueryBuilderLimitAndOffset(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE prices (id INTEGER PRIMARY KEY, amount REAL)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = Table("prices").Insert([]map[string]interface{}{
+		{"amount": 100.5},
+		{"amount": 200.0},
+		{"amount": 300.0},
+	})
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	prices, err := Table("prices").Limit(1).Offset(1).Get()
+
+	if err != nil {
+		t.Errorf("Failed to execute: %v", err)
+	}
+
+	if len(prices) != 1 {
+		t.Errorf("Failed to enforce limit, expected 1 row but got %d", len(prices))
+	}
+
+	if prices[0]["amount"].(float64) != 200.0 {
+		t.Errorf("Failed to enforce offset, expected amount 200.0 but got %v", prices[0]["amount"])
+	}
+}

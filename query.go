@@ -285,11 +285,12 @@ func (qb *QueryBuilder) executeSelect() (*sql.Rows, error) {
 		qb.buildHavingClause() +
 		qb.buildOrderByClause()
 
-	if qb.offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", qb.offset)
-	}
 	if qb.limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", qb.limit)
+	}
+
+	if qb.offset > 0 {
+		query += fmt.Sprintf(" OFFSET %d", qb.offset)
 	}
 
 	return qb.db.QueryContext(context.Background(), query, append(qb.getConditionValues(), qb.getHavingValues()...)...)
