@@ -349,26 +349,28 @@ func (qb *QueryBuilder) buildWhereClause() string {
 			}
 			groupClause += cond.Column + " " + cond.Operator + " ?"
 		}
-		// Only wrap in parentheses if there's more than one condition in the group
 		if len(group.Conditions) > 1 {
 			groupClause = "(" + groupClause + ")"
 		}
 		clauses = append(clauses, groupClause)
 	}
-	// If there's more than one group, join them with 'AND', but we need special handling for 'OR'
-	if len(clauses) > 1 {
-		// Here we need to check if any group is an 'OR' group and handle it differently
-		result := strings.Join(clauses, " AND ")
-		for _, group := range qb.conditionGroups {
-			if group.Logical == "OR" {
-				// If we find an 'OR' group, we need to replace 'AND' with 'OR' for that part
-				result = strings.Replace(result, "AND", "OR", 1)
-				break // We only replace once since we're dealing with groups
-			}
+
+	// Check if there's any 'OR' group, if so, we need to adjust how we join clauses
+	hasOr := false
+	for _, group := range qb.conditionGroups {
+		if group.Logical == "OR" {
+			hasOr = true
+			break
 		}
-		return " WHERE " + result
 	}
-	return " WHERE " + clauses[0]
+
+	if hasOr {
+		// If there's an 'OR' group, we join all clauses with 'OR' instead of 'AND'
+		return " WHERE " + strings.Join(clauses, " OR ")
+	} else {
+		// Otherwise, we use AND
+		return " WHERE " + strings.Join(clauses, " AND ")
+	}
 }
 
 func (qb *QueryBuilder) buildOrderByClause() string {

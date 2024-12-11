@@ -430,13 +430,14 @@ func TestQueryBuilderOrWhere(t *testing.T) {
 	rows, err := Table("users").
 		WhereConds([]*Cond{{"email", "LIKE", "%msn.com"}}).
 		OrWhere("age", 30).
+		OrWhere("name", "Charlie").
 		Get()
 	if err != nil {
 		t.Errorf("Failed to execute: %v", err)
 	}
 
-	if len(rows) != 3 {
-		t.Errorf("Expected 3 rows but got %d", len(rows))
+	if len(rows) != 4 {
+		t.Errorf("Expected 4 rows but got %d", len(rows))
 	}
 }
 
@@ -461,13 +462,18 @@ func TestQueryBuilderOrWhereConds(t *testing.T) {
 
 	rows, err := Table("users").
 		WhereConds([]*Cond{{"email", "LIKE", "%msn.com"}}).
-		OrWhereConds([]*Cond{{"age", ">", 30}}).
+		OrWhereConds([]*Cond{
+			{"name", "=", "Bob"},
+		}).
+		OrWhereConds([]*Cond{
+			{"age", ">", 30},
+		}).
 		Get()
 	if err != nil {
 		t.Errorf("Failed to execute: %v", err)
 	}
 
-	if len(rows) != 3 {
-		t.Errorf("Expected 3 rows but got %d", len(rows))
+	if len(rows) != 4 {
+		t.Errorf("Expected 4 rows but got %d", len(rows))
 	}
 }
