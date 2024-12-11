@@ -407,3 +407,67 @@ func TestQueryBuilderLimitAndOffset(t *testing.T) {
 		t.Errorf("Failed to enforce offset, expected amount 200.0 but got %v", prices[0]["amount"])
 	}
 }
+
+func TestQueryBuilderOrWhere(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = Table("users").Insert([]map[string]interface{}{
+		{"name": "Alice", "email": "a5lYH@msn.com", "age": 25},
+		{"name": "Bob", "email": "2x2Ht@yahoo.com", "age": 30},
+		{"name": "Charlie", "email": "a5lYH@gmail.com", "age": 35},
+		{"name": "David", "email": "2x2Ht@msn.com", "age": 40},
+	})
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	rows, err := Table("users").
+		WhereConds([]*Cond{{"email", "LIKE", "%msn.com"}}).
+		OrWhere("age", ">=", 30).
+		Get()
+	if err != nil {
+		t.Errorf("Failed to execute: %v", err)
+	}
+
+	if len(rows) != 3 {
+		t.Errorf("Expected 3 rows but got %d", len(rows))
+	}
+}
+
+func TestQueryBuilderOrWhereConds(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = Table("users").Insert([]map[string]interface{}{
+		{"name": "Alice", "email": "a5lYH@msn.com", "age": 25},
+		{"name": "Bob", "email": "2x2Ht@yahoo.com", "age": 30},
+		{"name": "Charlie", "email": "a5lYH@gmail.com", "age": 35},
+		{"name": "David", "email": "2x2Ht@msn.com", "age": 40},
+	})
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	rows, err := Table("users").
+		WhereConds([]*Cond{{"email", "LIKE", "%msn.com"}}).
+		OrWhereConds([]*Cond{{"age", ">", 30}}).
+		Get()
+	if err != nil {
+		t.Errorf("Failed to execute: %v", err)
+	}
+
+	if len(rows) != 3 {
+		t.Errorf("Expected 3 rows but got %d", len(rows))
+	}
+}
