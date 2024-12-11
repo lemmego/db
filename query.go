@@ -35,6 +35,8 @@ type QueryBuilder struct {
 	groupBy    []string
 	having     []*Cond
 	joins      []*Join
+	offset     int
+	limit      int
 }
 
 // Query initializes a new QueryBuilder with a database connection
@@ -52,6 +54,8 @@ func Query(connName ...string) *QueryBuilder {
 		conditions: make([]*Cond, 0),
 		groupBy:    make([]string, 0),
 		having:     make([]*Cond, 0),
+		offset:     0,
+		limit:      0,
 	}
 }
 
@@ -108,7 +112,8 @@ func (qb *QueryBuilder) OrWhereConds(conds []*Cond) *QueryBuilder {
 
 // First fetches the first result matching the conditions
 func (qb *QueryBuilder) First() (map[string]interface{}, error) {
-	rows, err := qb.executeSelect(1)
+	qb.Limit(1) // Ensure only one row is returned
+	rows, err := qb.executeSelect()
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +157,7 @@ func (qb *QueryBuilder) Having(column, operator string, value interface{}) *Quer
 
 // Get fetches all results matching the conditions, including GROUP BY and HAVING
 func (qb *QueryBuilder) Get() ([]map[string]interface{}, error) {
-	rows, err := qb.executeSelect(0)
+	rows, err := qb.executeSelect()
 	if err != nil {
 		return nil, err
 	}
@@ -250,16 +255,43 @@ func (qb *QueryBuilder) Distinct() *QueryBuilder {
 	return qb
 }
 
-func (qb *QueryBuilder) executeSelect(limit int) (*sql.Rows, error) {
+// Skip sets the number of records to skip before fetching results
+func (qb *QueryBuilder) Skip(offset int) *QueryBuilder {
+	qb.offset = offset
+	return qb
+}
+
+// Offset is an alias for Skip
+func (qb *QueryBuilder) Offset(offset int) *QueryBuilder {
+	return qb.Skip(offset)
+}
+
+// Take sets the number of records to return from the query
+func (qb *QueryBuilder) Take(limit int) *QueryBuilder {
+	qb.limit = limit
+	return qb
+}
+
+// Limit is an alias for Take
+func (qb *QueryBuilder) Limit(limit int) *QueryBuilder {
+	return qb.Take(limit)
+}
+
+func (qb *QueryBuilder) executeSelect() (*sql.Rows, error) {
 	query := "SELECT " + qb.buildSelectClause() + " FROM " + qb.table +
 		qb.buildJoinClause() +
 		qb.buildWhereClause() +
 		qb.buildGroupByClause() +
 		qb.buildHavingClause() +
 		qb.buildOrderByClause()
-	if limit > 0 {
-		query += " LIMIT 1"
+
+	if qb.offset > 0 {
+		query += fmt.Sprintf(" OFFSET %d", qb.offset)
 	}
+	if qb.limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", qb.limit)
+	}
+
 	return qb.db.QueryContext(context.Background(), query, append(qb.getConditionValues(), qb.getHavingValues()...)...)
 }
 
