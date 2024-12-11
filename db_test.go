@@ -172,8 +172,17 @@ func TestQueryBuilderAggregate(t *testing.T) {
 		t.Errorf("Count operation failed or returned wrong count: %v", err)
 	}
 
-	// Add more aggregate tests
-	// Test MAX, AVG would be similar but with appropriate data for numeric columns
+	// Test MAX
+	maxAge, err := Table("users").Max("age")
+	if err != nil || maxAge != 30 {
+		t.Errorf("Max operation failed or returned wrong max: %v", err)
+	}
+
+	// Test AVG
+	avgAge, err := Table("users").Avg("age")
+	if err != nil || avgAge != 27.5 {
+		t.Errorf("Avg operation failed or returned wrong avg: %v", err)
+	}
 }
 
 func TestQueryBuilderExists(t *testing.T) {
