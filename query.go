@@ -13,7 +13,11 @@ type Cond struct {
 	Column   string
 	Operator string
 	Value    interface{}
-	Logical  string
+}
+
+type CondGroup struct {
+	Conditions []*Cond
+	Logical    string // Default to "AND" or "OR" based on method
 }
 
 type Join struct {
@@ -26,18 +30,18 @@ type Join struct {
 
 // QueryBuilder provides methods for building SQL queries
 type QueryBuilder struct {
-	config     *Config
-	db         *sql.DB
-	table      string
-	conditions []*Cond
-	orderBy    string
-	selects    []string
-	distinct   bool
-	groupBy    []string
-	having     []*Cond
-	joins      []*Join
-	offset     int
-	limit      int
+	config          *Config
+	db              *sql.DB
+	table           string
+	conditionGroups []*CondGroup
+	orderBy         string
+	selects         []string
+	distinct        bool
+	groupBy         []string
+	having          []*Cond
+	joins           []*Join
+	offset          int
+	limit           int
 }
 
 // Query initializes a new QueryBuilder with a database connection
@@ -50,13 +54,13 @@ func Query(connName ...string) *QueryBuilder {
 	}
 
 	return &QueryBuilder{
-		db:         Get(name).DB,
-		config:     Get(name).Config,
-		conditions: make([]*Cond, 0),
-		groupBy:    make([]string, 0),
-		having:     make([]*Cond, 0),
-		offset:     0,
-		limit:      0,
+		db:              Get(name).DB,
+		config:          Get(name).Config,
+		conditionGroups: make([]*CondGroup, 0),
+		groupBy:         make([]string, 0),
+		having:          make([]*Cond, 0),
+		offset:          0,
+		limit:           0,
 	}
 }
 
@@ -81,48 +85,40 @@ func Table(table string, connName ...string) *QueryBuilder {
 
 // Where adds a condition to the WHERE clause with '=' operator by default
 func (qb *QueryBuilder) Where(column string, value interface{}) *QueryBuilder {
-	qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value, Logical: "AND"})
-	return qb
+	return qb.WhereConds([]*Cond{{Column: column, Operator: "=", Value: value}})
 }
 
 // WhereMap adds multiple conditions to the WHERE clause using '=' operator for all
 func (qb *QueryBuilder) WhereMap(conditions map[string]interface{}) *QueryBuilder {
+	conds := make([]*Cond, 0, len(conditions))
 	for column, value := range conditions {
-		qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value, Logical: "AND"})
+		conds = append(conds, &Cond{Column: column, Operator: "=", Value: value})
 	}
-	return qb
+	return qb.WhereConds(conds)
 }
 
-// WhereConds adds multiple conditions to the WHERE clause
+// WhereConds adds multiple conditions to the WHERE clause using 'AND'
 func (qb *QueryBuilder) WhereConds(conds []*Cond) *QueryBuilder {
-	for _, cond := range conds {
-		cond.Logical = "AND"
-	}
-	qb.conditions = append(qb.conditions, conds...)
-	return qb
+	return qb.addConditionGroup(conds, "AND")
 }
 
 // OrWhere adds a condition to the WHERE clause with 'OR' operator
-func (qb *QueryBuilder) OrWhere(column, operator string, value interface{}) *QueryBuilder {
-	qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: operator, Value: value, Logical: "OR"})
-	return qb
+func (qb *QueryBuilder) OrWhere(column string, value interface{}) *QueryBuilder {
+	return qb.OrWhereConds([]*Cond{{Column: column, Operator: "=", Value: value}})
 }
 
 // OrWhereMap adds multiple conditions to the WHERE clause using 'OR' operator for all
 func (qb *QueryBuilder) OrWhereMap(conditions map[string]interface{}) *QueryBuilder {
+	conds := make([]*Cond, 0, len(conditions))
 	for column, value := range conditions {
-		qb.conditions = append(qb.conditions, &Cond{Column: column, Operator: "=", Value: value, Logical: "OR"})
+		conds = append(conds, &Cond{Column: column, Operator: "=", Value: value})
 	}
-	return qb
+	return qb.OrWhereConds(conds)
 }
 
-// OrWhereConds adds multiple conditions to the WHERE clause with 'OR' operator
+// OrWhereConds adds multiple conditions to the WHERE clause using 'OR'
 func (qb *QueryBuilder) OrWhereConds(conds []*Cond) *QueryBuilder {
-	for _, cond := range conds {
-		cond.Logical = "OR"
-	}
-	qb.conditions = append(qb.conditions, conds...)
-	return qb
+	return qb.addConditionGroup(conds, "OR")
 }
 
 // First fetches the first result matching the conditions
@@ -341,17 +337,38 @@ func (qb *QueryBuilder) getHavingValues() []interface{} {
 }
 
 func (qb *QueryBuilder) buildWhereClause() string {
-	if len(qb.conditions) == 0 {
+	if len(qb.conditionGroups) == 0 {
 		return ""
 	}
-	clause := " WHERE "
-	for i, cond := range qb.conditions {
-		if i > 0 {
-			clause += " " + cond.Logical + " "
+	var clauses []string
+	for _, group := range qb.conditionGroups {
+		groupClause := ""
+		for j, cond := range group.Conditions {
+			if j > 0 {
+				groupClause += " " + group.Logical + " "
+			}
+			groupClause += cond.Column + " " + cond.Operator + " ?"
 		}
-		clause += cond.Column + " " + cond.Operator + " ?"
+		// Only wrap in parentheses if there's more than one condition in the group
+		if len(group.Conditions) > 1 {
+			groupClause = "(" + groupClause + ")"
+		}
+		clauses = append(clauses, groupClause)
 	}
-	return clause
+	// If there's more than one group, join them with 'AND', but we need special handling for 'OR'
+	if len(clauses) > 1 {
+		// Here we need to check if any group is an 'OR' group and handle it differently
+		result := strings.Join(clauses, " AND ")
+		for _, group := range qb.conditionGroups {
+			if group.Logical == "OR" {
+				// If we find an 'OR' group, we need to replace 'AND' with 'OR' for that part
+				result = strings.Replace(result, "AND", "OR", 1)
+				break // We only replace once since we're dealing with groups
+			}
+		}
+		return " WHERE " + result
+	}
+	return " WHERE " + clauses[0]
 }
 
 func (qb *QueryBuilder) buildOrderByClause() string {
@@ -540,10 +557,21 @@ func (qb *QueryBuilder) JoinType(joinType string) *QueryBuilder {
 
 func (qb *QueryBuilder) getConditionValues() []interface{} {
 	values := make([]interface{}, 0)
-	for _, cond := range qb.conditions {
-		values = append(values, cond.Value)
+	for _, group := range qb.conditionGroups {
+		for _, cond := range group.Conditions {
+			values = append(values, cond.Value)
+		}
 	}
 	return values
+}
+
+// Method to add conditions with a specific logical operator
+func (qb *QueryBuilder) addConditionGroup(conds []*Cond, logical string) *QueryBuilder {
+	qb.conditionGroups = append(qb.conditionGroups, &CondGroup{
+		Conditions: conds,
+		Logical:    logical,
+	})
+	return qb
 }
 
 func (qb *QueryBuilder) convertMapToConds(data map[string]interface{}) []*Cond {

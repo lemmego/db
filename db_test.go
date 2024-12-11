@@ -82,7 +82,7 @@ func TestQueryBuilder(t *testing.T) {
 		t.Error("config should not be nil")
 	}
 
-	if len(qb.conditions) != 0 {
+	if len(qb.conditionGroups) != 0 {
 		t.Error("conditions should be empty")
 	}
 }
@@ -429,7 +429,7 @@ func TestQueryBuilderOrWhere(t *testing.T) {
 
 	rows, err := Table("users").
 		WhereConds([]*Cond{{"email", "LIKE", "%msn.com"}}).
-		OrWhere("age", ">=", 30).
+		OrWhere("age", 30).
 		Get()
 	if err != nil {
 		t.Errorf("Failed to execute: %v", err)
