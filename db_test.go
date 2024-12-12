@@ -516,3 +516,189 @@ func TestQueryBuilderOrWhereMap(t *testing.T) {
 		t.Errorf("Expected 3 rows but got %d", len(rows))
 	}
 }
+
+func TestQueryBuilderJoin(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, age INTEGER)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = db.Exec("CREATE TABLE orders (user_id INTEGER, total REAL)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = Table("users").Insert([]map[string]interface{}{
+		{"name": "Alice", "email": "a5lYH@msn.com", "age": 25},
+		{"name": "Bob", "email": "2x2Ht@yahoo.com", "age": 30},
+		{"name": "Charlie", "email": "a5lYH@gmail.com", "age": 35},
+		{"name": "David", "email": "2x2Ht@msn.com", "age": 40},
+	})
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	_, err = Table("orders").Insert([]map[string]interface{}{
+		{"user_id": 1, "total": 100.00},
+		{"user_id": 2, "total": 50.00},
+		{"user_id": 3, "total": 200.00},
+		{"user_id": 4, "total": 150.00},
+	})
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	// Test JOIN method
+	results, err := Table("users").Join("orders", "users.id", "=", "orders.user_id").Get()
+
+	// We expect 4 rows since there are 4 users
+	// We expect 6 columns for each user since there are 4 in the users table and 2 in the orders table
+	if err != nil || len(results) != 4 || len(results[0]) != 6 {
+		t.Errorf("Failed to join tables: %v", err)
+	}
+}
+
+func TestQueryBuilderLeftJoin(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = db.Exec("CREATE TABLE orders (user_id INTEGER, total REAL)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	users := []map[string]interface{}{
+		{"name": "Alice"},
+		{"name": "Bob"},
+		{"name": "Charlie"},
+		{"name": "David"},
+	}
+	_, err = Table("users").Insert(users)
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	orders := []map[string]interface{}{
+		{"user_id": 1, "total": 100.00},
+		{"user_id": 2, "total": 200.00},
+		{"user_id": 5, "total": 50.00},
+		{"user_id": 6, "total": 150.00},
+	}
+	_, err = Table("orders").Insert(orders)
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	// Test LEFT JOIN method
+	results, err := Table("users").
+		Join("orders", "users.id", "=", "orders.user_id").
+		JoinType("LEFT").
+		Get()
+
+	// We expect 4 rows because there are 4 users, and we are doing a LEFT JOIN
+	// | id | name    | user_id | total |
+	// |----|---------|---------|-------|
+	// |  1 | Alice   |       1 | 100.0 |
+	// |  2 | Bob     |       2 | 200.0 |
+	// |  3 | Charlie |         |       |
+	// |  4 | David   |         |       |
+	if len(results) != 4 {
+		t.Errorf("Expected 4 rows but got %d", len(results))
+	}
+
+	for index, result := range results {
+		// All user ids should be present
+		if result["id"] == nil {
+			t.Errorf("ID should not be nil: %v", result["id"])
+		}
+
+		// All user's name should match with respective map
+		if result["name"] != users[index]["name"] {
+			t.Errorf("Name should be %v, found %v", users[index]["name"], result["name"])
+		}
+
+		// First two users have orders, their total should match
+		if index < 2 && result["total"] != orders[index]["total"] {
+			t.Errorf("Total should be %v, found %v", orders[index]["total"], result["total"])
+		}
+
+		// Last two users don't have orders, total should be nil
+		if index >= 2 && result["total"] != nil {
+			t.Errorf("Total should be nil, found %v", result["total"])
+		}
+	}
+}
+
+func TestQueryBuilderRightJoin(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	defer db.Close()
+
+	_, err := db.Exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	_, err = db.Exec("CREATE TABLE orders (user_id INTEGER, total REAL)")
+	if err != nil {
+		t.Fatalf("Could not create table: %v", err)
+	}
+
+	users := []map[string]interface{}{
+		{"name": "Alice"},
+		{"name": "Bob"},
+		{"name": "Charlie"},
+		{"name": "David"},
+	}
+	_, err = Table("users").Insert(users)
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	orders := []map[string]interface{}{
+		{"user_id": 1, "total": 100.00},
+		{"user_id": 2, "total": 200.00},
+		{"user_id": 5, "total": 50.00},
+		{"user_id": 6, "total": 150.00},
+	}
+	_, err = Table("orders").Insert(orders)
+	if err != nil {
+		t.Fatalf("Could not insert data: %v", err)
+	}
+
+	// Test RIGHT JOIN method
+	results, err := Table("users").
+		Join("orders", "users.id", "=", "orders.user_id").
+		JoinType("RIGHT").
+		Get()
+
+	// We expect 4 rows because there are 4 orders, and we are doing a RIGHT JOIN
+	// | id | name  | user_id | total |
+	// |----|-------|---------|-------|
+	// |  1 | Alice |       1 | 100.0 |
+	// |  2 | Bob   |       2 | 200.0 |
+	// |    |       |       5 |  50.0 |
+	// |    |       |       6 | 150.0 |
+	if len(results) != 4 {
+		t.Errorf("Expected 4 rows but got %d", len(results))
+	}
+
+	for index, result := range results {
+		// Last two orders don't have users, id should be nil
+		if index >= 2 && result["id"] != nil {
+			t.Errorf("ID should be nil, found %v", result["id"])
+		}
+
+		// First two orders have respective users, their total should match
+		if index < 2 && result["total"] != orders[index]["total"] {
+			t.Errorf("Total should be %v, found %v", orders[index]["total"], result["total"])
+		}
+	}
+}
