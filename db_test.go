@@ -2,14 +2,19 @@ package db
 
 import (
 	"database/sql"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/joho/godotenv/autoload"
 	_ "github.com/mattn/go-sqlite3"
 )
 
 func setupDb(dialect string) *sql.DB {
 	var config *Config
+
 	switch dialect {
 	case DialectSQLite:
 		config = &Config{
@@ -18,7 +23,20 @@ func setupDb(dialect string) *sql.DB {
 			Database: ":memory:",
 			Params:   "cache=shared",
 		}
-	case DialectMySQL, DialectPgSQL:
+	case DialectMySQL:
+		{
+			port, _ := strconv.Atoi(os.Getenv("MYSQL_DB_PORT"))
+			config = &Config{
+				ConnName: "default",
+				Driver:   DialectMySQL,
+				Database: os.Getenv("MYSQL_DB_DATABASE"),
+				Host:     os.Getenv("MYSQL_DB_HOST"),
+				Port:     port,
+				User:     os.Getenv("MYSQL_DB_USER"),
+				Password: os.Getenv("MYSQL_DB_PASSWORD"),
+			}
+		}
+	case DialectPgSQL:
 		config = &Config{} // Not implemented yet
 	}
 
