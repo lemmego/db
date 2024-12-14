@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func setupDb(dialect string) *sql.DB {
@@ -57,18 +58,53 @@ func createUsersTable(t *testing.T, db *sql.DB) {
 	}
 }
 
-//func TestStruct(t *testing.T) {
-//	// TODO: Update this
-//	type User struct {
-//		ID uint64 `db:"id"`
-//	}
-//
-//	db := setupDb(DialectSQLite)
-//
-//	db.Exec(
-//		StructBuilder(&User{}).InsertInto("users").Build(),
-//	)
-//}
+type User struct {
+	ID        int64     `db:"id" fieldtag:"pk"`
+	Name      string    `db:"name"`
+	CreatedAt time.Time `db:"created_at"`
+}
+
+func TestStruct(t *testing.T) {
+	db := setupDb(DialectSQLite)
+	createUsersTable(t, db)
+
+	ib, args := InsertBuilder().InsertInto("users").
+		Cols("id", "name", "created_at").
+		Values(1, "Sowren Sen", 1234567890).
+		Values(2, "Tanmay Das", 1234567890).Build()
+
+	_, err := db.Exec(ib, args...)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	userStruct := StructBuilder(new(User))
+	sb := userStruct.SelectFrom("users")
+	sb.Where(sb.Equal("id", 1))
+
+	q, args := sb.Build()
+
+	rows, err := db.Query(q, args...)
+
+	defer rows.Close()
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	var user User
+	if rows.Next() {
+		err = rows.Scan(userStruct.Addr(&user)...)
+		if err != nil {
+			t.Errorf(err.Error())
+		}
+	}
+
+	if user.Name != "Sowren Sen" || user.CreatedAt.IsZero() {
+		t.Errorf("Could not find user")
+	}
+
+}
 
 func TestCreateTable(t *testing.T) {
 	db := setupDb(DialectSQLite)
