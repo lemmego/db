@@ -44,7 +44,7 @@ func setupDb(dialect string) *sql.DB {
 }
 
 func createUsersTable(t *testing.T, db *sql.DB) {
-	ctb := CreateTableBuilder().CreateTable("users")
+	ctb := BuildCreateTable().CreateTable("users")
 	ctb.Define("id", "INTEGER", "PRIMARY KEY")
 	ctb.Define("name", "VARCHAR(255)", "NOT NULL")
 	ctb.Define("created_at", "DATETIME", "NOT NULL")
@@ -68,7 +68,7 @@ func TestStruct(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	createUsersTable(t, db)
 
-	ib, args := InsertBuilder().InsertInto("users").
+	ib, args := BuildInsert().InsertInto("users").
 		Cols("id", "name", "created_at").
 		Values(1, "Sowren Sen", 1234567890).
 		Values(2, "Tanmay Das", 1234567890).Build()
@@ -78,7 +78,7 @@ func TestStruct(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 
-	userStruct := StructBuilder(new(User))
+	userStruct := BuildStruct(new(User))
 	sb := userStruct.SelectFrom("users")
 	sb.Where(sb.Equal("id", 1))
 
@@ -114,7 +114,7 @@ func TestCreateTable(t *testing.T) {
 func TestSelect(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	createUsersTable(t, db)
-	sb, _ := SelectBuilder().Select("*").From("users").Build()
+	sb, _ := BuildSelect().Select("*").From("users").Build()
 	rows, err := db.Query(sb)
 	defer rows.Close()
 	if err != nil {
@@ -126,7 +126,7 @@ func TestInsert(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	createUsersTable(t, db)
 
-	ib, args := InsertBuilder().InsertInto("users").
+	ib, args := BuildInsert().InsertInto("users").
 		Cols("id", "name", "created_at").
 		Values(1, "Huan Du", 1234567890).
 		Values(2, "Charmy Liu", 1234567890).Build()
@@ -145,7 +145,7 @@ func TestUpdate(t *testing.T) {
 	// TODO: Update this
 	db := setupDb(DialectSQLite)
 
-	ub := UpdateBuilder()
+	ub := BuildUpdate()
 	db.Exec(
 		ub.Update("users").Set(ub.Assign("foo", "bar")).Build(),
 	)
@@ -156,6 +156,6 @@ func TestDelete(t *testing.T) {
 	db := setupDb(DialectSQLite)
 
 	db.Exec(
-		DeleteBuilder().DeleteFrom("users").Build(),
+		BuildDelete().DeleteFrom("users").Build(),
 	)
 }

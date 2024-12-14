@@ -2,104 +2,104 @@ package db
 
 import "github.com/huandu/go-sqlbuilder"
 
-type BuilderStruct struct {
+type StructBuilder struct {
 	*sqlbuilder.Struct
 }
 
-type BuilderCreateTable struct {
+type CreateTableBuilder struct {
 	*sqlbuilder.CreateTableBuilder
 }
 
-type BuilderSelect struct {
+type SelectBuilder struct {
 	*sqlbuilder.SelectBuilder
 }
 
-type BuilderInsert struct {
+type InsertBuilder struct {
 	*sqlbuilder.InsertBuilder
 }
 
-type BuilderUpdate struct {
+type UpdateBuilder struct {
 	*sqlbuilder.UpdateBuilder
 }
 
-type BuilderDelete struct {
+type DeleteBuilder struct {
 	*sqlbuilder.DeleteBuilder
 }
 
-func StructBuilder(structValue interface{}, connName ...string) *BuilderStruct {
+func BuildStruct(structValue interface{}, connName ...string) *StructBuilder {
 	builder := sqlbuilder.NewStruct(structValue)
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
-		return &BuilderStruct{builder.For(sqlbuilder.SQLite)}
+		return &StructBuilder{builder.For(sqlbuilder.SQLite)}
 	case DialectMySQL:
-		return &BuilderStruct{builder.For(sqlbuilder.MySQL)}
+		return &StructBuilder{builder.For(sqlbuilder.MySQL)}
 	case DialectPgSQL:
-		return &BuilderStruct{builder.For(sqlbuilder.PostgreSQL)}
+		return &StructBuilder{builder.For(sqlbuilder.PostgreSQL)}
 	default:
 		panic("unsupported driver")
 	}
 }
 
-func CreateTableBuilder(connName ...string) *BuilderCreateTable {
+func BuildCreateTable(connName ...string) *CreateTableBuilder {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
-		return &BuilderCreateTable{sqlbuilder.SQLite.NewCreateTableBuilder()}
+		return &CreateTableBuilder{sqlbuilder.SQLite.NewCreateTableBuilder()}
 	case DialectMySQL:
-		return &BuilderCreateTable{sqlbuilder.MySQL.NewCreateTableBuilder()}
+		return &CreateTableBuilder{sqlbuilder.MySQL.NewCreateTableBuilder()}
 	case DialectPgSQL:
-		return &BuilderCreateTable{sqlbuilder.PostgreSQL.NewCreateTableBuilder()}
+		return &CreateTableBuilder{sqlbuilder.PostgreSQL.NewCreateTableBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
-func SelectBuilder(connName ...string) *BuilderSelect {
+func BuildSelect(connName ...string) *SelectBuilder {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
-		return &BuilderSelect{sqlbuilder.SQLite.NewSelectBuilder()}
+		return &SelectBuilder{sqlbuilder.SQLite.NewSelectBuilder()}
 	case DialectMySQL:
-		return &BuilderSelect{sqlbuilder.MySQL.NewSelectBuilder()}
+		return &SelectBuilder{sqlbuilder.MySQL.NewSelectBuilder()}
 	case DialectPgSQL:
-		return &BuilderSelect{sqlbuilder.PostgreSQL.NewSelectBuilder()}
+		return &SelectBuilder{sqlbuilder.PostgreSQL.NewSelectBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
-func InsertBuilder(connName ...string) *BuilderInsert {
+func BuildInsert(connName ...string) *InsertBuilder {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
-		return &BuilderInsert{sqlbuilder.SQLite.NewInsertBuilder()}
+		return &InsertBuilder{sqlbuilder.SQLite.NewInsertBuilder()}
 	case DialectMySQL:
-		return &BuilderInsert{sqlbuilder.MySQL.NewInsertBuilder()}
+		return &InsertBuilder{sqlbuilder.MySQL.NewInsertBuilder()}
 	case DialectPgSQL:
-		return &BuilderInsert{sqlbuilder.PostgreSQL.NewInsertBuilder()}
+		return &InsertBuilder{sqlbuilder.PostgreSQL.NewInsertBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
-func UpdateBuilder(connName ...string) *BuilderUpdate {
+func BuildUpdate(connName ...string) *UpdateBuilder {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
-		return &BuilderUpdate{sqlbuilder.SQLite.NewUpdateBuilder()}
+		return &UpdateBuilder{sqlbuilder.SQLite.NewUpdateBuilder()}
 	case DialectMySQL:
-		return &BuilderUpdate{sqlbuilder.MySQL.NewUpdateBuilder()}
+		return &UpdateBuilder{sqlbuilder.MySQL.NewUpdateBuilder()}
 	case DialectPgSQL:
-		return &BuilderUpdate{sqlbuilder.PostgreSQL.NewUpdateBuilder()}
+		return &UpdateBuilder{sqlbuilder.PostgreSQL.NewUpdateBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
-func DeleteBuilder(connName ...string) *BuilderDelete {
+func BuildDelete(connName ...string) *DeleteBuilder {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
-		return &BuilderDelete{sqlbuilder.SQLite.NewDeleteBuilder()}
+		return &DeleteBuilder{sqlbuilder.SQLite.NewDeleteBuilder()}
 	case DialectMySQL:
-		return &BuilderDelete{sqlbuilder.MySQL.NewDeleteBuilder()}
+		return &DeleteBuilder{sqlbuilder.MySQL.NewDeleteBuilder()}
 	case DialectPgSQL:
-		return &BuilderDelete{sqlbuilder.PostgreSQL.NewDeleteBuilder()}
+		return &DeleteBuilder{sqlbuilder.PostgreSQL.NewDeleteBuilder()}
 	default:
 		panic("unsupported driver")
 	}
