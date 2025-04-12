@@ -2,14 +2,15 @@ package db
 
 import (
 	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
 	"os"
 	"strconv"
 	"testing"
-	"time"
+
+	"github.com/k0kubun/pp/v3"
+	_ "github.com/mattn/go-sqlite3"
 )
 
-func setupDb(dialect string) *sql.DB {
+func setupDb(dialect string) *Connection {
 	var config *Config
 
 	switch dialect {
@@ -38,13 +39,17 @@ func setupDb(dialect string) *sql.DB {
 	}
 
 	conn := NewConnection(config)
-	db := conn.Open()
+	conn.Open()
 	DM().Add(config.ConnName, conn)
-	return db
+	createUsersTable(conn.Db())
+	createPostsTable(conn.Db())
+	createCommentsTable(conn.Db())
+	return conn
 }
 
-func createUsersTable(t *testing.T, db *sql.DB) {
-	ctb := BuildCreateTable().CreateTable("users")
+func createUsersTable(db *sql.DB) error {
+	db.Exec(`DELETE from users`)
+	ctb := CreateTableBuilder().CreateTable("users").IfNotExists()
 	ctb.Define("id", "INTEGER", "PRIMARY KEY")
 	ctb.Define("name", "VARCHAR(255)", "NOT NULL")
 	ctb.Define("created_at", "DATETIME", "NOT NULL")
@@ -54,67 +59,182 @@ func createUsersTable(t *testing.T, db *sql.DB) {
 	_, err := db.Exec(q)
 
 	if err != nil {
-		t.Errorf(err.Error())
+		return err
 	}
+
+	return nil
 }
 
-type User struct {
-	ID        int64     `db:"id" fieldtag:"pk"`
-	Name      string    `db:"name"`
-	CreatedAt time.Time `db:"created_at"`
+func createPostsTable(db *sql.DB) error {
+	db.Exec(`DELETE from posts`)
+	ctb := CreateTableBuilder().CreateTable("posts").IfNotExists()
+	ctb.Define("id", "INTEGER", "PRIMARY KEY")
+	ctb.Define("user_id", "INTEGER", "NOT NULL")
+	ctb.Define("title", "VARCHAR(255)", "NOT NULL")
+	ctb.Define("body", "TEXT", "NOT NULL")
+
+	q, _ := ctb.Build()
+
+	_, err := db.Exec(q)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
-func TestStruct(t *testing.T) {
+func createCommentsTable(db *sql.DB) error {
+	db.Exec(`DELETE from  comments`)
+	ctb := CreateTableBuilder().CreateTable("comments").IfNotExists()
+	ctb.Define("id", "INTEGER", "PRIMARY KEY")
+	ctb.Define("post_id", "INTEGER", "NOT NULL")
+	ctb.Define("body", "TEXT", "NOT NULL")
+
+	q, _ := ctb.Build()
+
+	_, err := db.Exec(q)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func TestFind(t *testing.T) {
 	db := setupDb(DialectSQLite)
-	createUsersTable(t, db)
 
-	ib, args := BuildInsert().InsertInto("users").
+	ib, args := InsertBuilder().InsertInto("users").
 		Cols("id", "name", "created_at").
-		Values(1, "Sowren Sen", 1234567890).
-		Values(2, "Tanmay Das", 1234567890).Build()
+		Values(1, "John Doe", 1234567890).
+		Values(2, "Jane Doe", 1234567890).
+		Values(3, "James Doe", 1234567890).Build()
 
 	_, err := db.Exec(ib, args...)
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	userStruct := BuildStruct(new(User))
-	sb := userStruct.SelectFrom("users")
-	sb.Where(sb.Equal("id", 1))
+	ib, args = InsertBuilder().InsertInto("posts").
+		Cols("id", "user_id", "title", "body").
+		Values(1, 1, "Post 1", "Lorem ipsum dolor sit amet").
+		Values(2, 1, "Post 2", "Consectetur adipiscing elit").
+		Values(3, 2, "Post 3", "A quick brown fox jumps").Build()
 
-	q, args := sb.Build()
+	_, err = db.Exec(ib, args...)
 
-	rows, err := db.Query(q, args...)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 
+	ib, args = InsertBuilder().InsertInto("comments").
+		Cols("id", "post_id", "body").
+		Values(1, 1, "Comment 1").
+		Values(2, 1, "Comment 2").
+		Values(3, 2, "Comment 3").Build()
+
+	_, err = db.Exec(ib, args...)
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	var users []User
+
+	err = Query().
+		Select("*").
+		Debug(true).
+		Where(Like("name", "%John%")).
+		Offset(0).
+		Limit(2).
+		Find(&users, &Opts{[]*Rel{
+			{Name: "posts", Type: OneToMany, Table: "posts", Cols: []string{"id", "title"}, Rel: &Rel{
+				Name: "comments", Type: OneToMany, Table: "comments", Cols: []string{"id", "body"},
+			}},
+		}})
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	pp.Print(users)
+}
+
+func TestDatabaseSQL(t *testing.T) {
+	db := setupDb(DialectSQLite)
+
+	ib, args := InsertBuilder().InsertInto("users").
+		Cols("id", "name", "created_at").
+		Values(1, "Sowren Sen", 1234567890).
+		Values(2, "Tanmay Tanmay", 1234567890).
+		Values(3, "Tanmay Das", 1234567890).Build()
+
+	_, err := db.Exec(ib, args...)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	ib, args = InsertBuilder().InsertInto("posts").
+		Cols("id", "user_id", "title", "body").
+		Values(1, 1, "Lorem", "Lorem ipsum dolor sit amet").
+		Values(2, 1, "Ipsum", "Consectetur adipiscing elit").
+		Values(3, 2, "Dolor", "A quick brown fox jumps").Build()
+
+	_, err = db.Exec(ib, args...)
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	rows, err := db.Query(`
+		SELECT users.id as "users.id", users.name as "users.name", users.created_at as "users.created_at", posts.id as "posts.id" FROM users
+		LEFT JOIN posts ON users.id = posts.user_id`)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 	defer rows.Close()
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	var user User
-	if rows.Next() {
-		err = rows.Scan(userStruct.Addr(&user)...)
-		if err != nil {
-			t.Errorf(err.Error())
-		}
+}
+
+func TestFirst(t *testing.T) {
+	db := setupDb(DialectSQLite)
+
+	ib, args := InsertBuilder().InsertInto("users").
+		Cols("id", "name", "created_at").
+		Values(1, "Sowren Sen", 1234567890).
+		Values(2, "Tanmay Tanmay", 1234567890).
+		Values(3, "Tanmay Das", 1234567890).Build()
+
+	_, err := db.Exec(ib, args...)
+	if err != nil {
+		t.Errorf(err.Error())
 	}
 
-	if user.Name != "Sowren Sen" || user.CreatedAt.IsZero() {
-		t.Errorf("Could not find user")
-	}
+	ib, args = InsertBuilder().InsertInto("posts").
+		Cols("id", "user_id", "title", "body").
+		Values(1, 1, "Lorem", "Lorem ipsum dolor sit amet").
+		Values(2, 1, "Ipsum", "Consectetur adipiscing elit").
+		Values(3, 2, "Dolor", "A quick brown fox jumps").Build()
 
+	_, err = db.Exec(ib, args...)
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 }
 
 func TestCreateTable(t *testing.T) {
-	db := setupDb(DialectSQLite)
-	createUsersTable(t, db)
+	//db := setupDb(DialectSQLite)
 }
 
 func TestSelect(t *testing.T) {
 	db := setupDb(DialectSQLite)
-	createUsersTable(t, db)
-	sb, _ := BuildSelect().Select("*").From("users").Build()
+	sb, _ := SelectBuilder().Select("*").From("users").Build()
 	rows, err := db.Query(sb)
 	defer rows.Close()
 	if err != nil {
@@ -124,9 +244,8 @@ func TestSelect(t *testing.T) {
 
 func TestInsert(t *testing.T) {
 	db := setupDb(DialectSQLite)
-	createUsersTable(t, db)
 
-	ib, args := BuildInsert().InsertInto("users").
+	ib, args := InsertBuilder().InsertInto("users").
 		Cols("id", "name", "created_at").
 		Values(1, "Huan Du", 1234567890).
 		Values(2, "Charmy Liu", 1234567890).Build()
@@ -145,7 +264,7 @@ func TestUpdate(t *testing.T) {
 	// TODO: Update this
 	db := setupDb(DialectSQLite)
 
-	ub := BuildUpdate()
+	ub := UpdateBuilder()
 	db.Exec(
 		ub.Update("users").Set(ub.Assign("foo", "bar")).Build(),
 	)
@@ -156,6 +275,6 @@ func TestDelete(t *testing.T) {
 	db := setupDb(DialectSQLite)
 
 	db.Exec(
-		BuildDelete().DeleteFrom("users").Build(),
+		DeleteBuilder().DeleteFrom("users").Build(),
 	)
 }

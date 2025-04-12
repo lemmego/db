@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -14,10 +13,6 @@ var (
 	instance *DatabaseManager
 )
 
-func ProvideConfig(cb func() *Config) *Config {
-	return cb()
-}
-
 type Config struct {
 	ConnName string
 	Driver   string
@@ -29,36 +24,10 @@ type Config struct {
 	Params   string
 }
 
-type Connection struct {
-	*Config
-	*sql.DB
-}
-
 type Model struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func NewConnection(config *Config) *Connection {
-	return &Connection{config, nil}
-}
-
-func (c *Connection) Open() *sql.DB {
-	switch c.Config.Driver {
-	case DialectSQLite:
-		c.DB = NewSQLiteConnection(c.Config).Connect()
-	case DialectMySQL:
-		c.DB = NewMySQLConnection(c.Config).Connect()
-	case DialectPgSQL:
-		c.DB = NewPgSQLConnection(c.Config).Connect()
-	}
-
-	if c.DB == nil {
-		panic("unsupported driver")
-	}
-
-	return c.DB
 }
 
 func (c *Config) DataSource() *DataSource {
@@ -168,4 +137,9 @@ func Get(name ...string) *Connection {
 	}
 
 	return conn
+}
+
+func Query(connName ...string) *QueryBuilder {
+	conn := Get(connName...)
+	return NewQueryBuilder(conn)
 }
