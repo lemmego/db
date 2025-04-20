@@ -140,25 +140,22 @@ func TestFind(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 
-	var users []User
+	//var users []User
 
-	err = Query().
+	result, err := Query().
+		Table("users").
 		Select("*").
 		Debug(true).
 		Where(Like("name", "%John%")).
 		Offset(0).
 		Limit(2).
-		Find(&users, &Opts{[]*Rel{
-			{Name: "posts", Type: OneToMany, Table: "posts", Cols: []string{"id", "title"}, Rel: &Rel{
-				Name: "comments", Type: OneToMany, Table: "comments", Cols: []string{"id", "body"},
-			}},
-		}})
+		Fetch()
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	pp.Print(users)
+	pp.Print(result)
 }
 
 func TestDatabaseSQL(t *testing.T) {

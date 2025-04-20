@@ -2,30 +2,8 @@ package db
 
 import (
 	"database/sql"
-	"github.com/gertd/go-pluralize"
 	"github.com/jmoiron/sqlx"
-	"reflect"
-	"strings"
 )
-
-type Criteria struct {
-	Populate   []string
-	WhereCond  CondFunc
-	HavingCond CondFunc
-}
-
-func DetermineTableName(modelPtr interface{}) string {
-	return determinePlural(getStructName(modelPtr))
-}
-
-func getStructName(modelPtr interface{}) string {
-	return reflect.TypeOf(modelPtr).Elem().Name()
-}
-
-func determinePlural(name string) string {
-	pc := pluralize.NewClient()
-	return strings.ToLower(pc.Plural(name))
-}
 
 type Connection struct {
 	*Config
@@ -79,10 +57,6 @@ func (c *Connection) Close() error {
 
 func (c *Connection) Table(name string) *QueryBuilder {
 	return NewQueryBuilder(c).Table(name)
-}
-
-func (qb *QueryBuilder) Load(relationStrings ...string) *QueryBuilder {
-	return qb
 }
 
 func (c *Connection) CreateTable(cb func(sb *BuilderCreateTable) Builder) *Connection {
