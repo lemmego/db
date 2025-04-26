@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
-	"time"
 )
 
 var (
@@ -22,12 +21,6 @@ type Config struct {
 	Password string
 	Database string
 	Params   string
-}
-
-type Model struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (c *Config) DataSource() *DataSource {
@@ -139,7 +132,12 @@ func Get(name ...string) *Connection {
 	return conn
 }
 
+func (qb *QueryBuilder) Conn(connName ...string) *QueryBuilder {
+	qb.conn = Get(connName...)
+	return qb
+}
+
 func Query(connName ...string) *QueryBuilder {
 	conn := Get(connName...)
-	return NewQueryBuilder(conn)
+	return NewQueryBuilder(conn, SelectBuilder(conn.ConnName))
 }

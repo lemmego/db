@@ -1,11 +1,19 @@
 package db
 
 import (
-	"github.com/k0kubun/pp/v3"
+	"database/sql"
 	"time"
+
+	"github.com/k0kubun/pp/v3"
 
 	"github.com/huandu/go-sqlbuilder"
 )
+
+type DBResult struct {
+	RowsAffected int64
+	LastInsertId int64
+	Rows         *sql.Rows
+}
 
 type Cond interface {
 	Equal(field string, value interface{}) string
@@ -53,31 +61,15 @@ type Builder interface {
 	sqlbuilder.Builder
 }
 
+type Struct struct {
+	*sqlbuilder.Struct
+}
+
 type QueryBuilder struct {
 	conn      *Connection
 	builder   Builder
 	tableName string
 	debug     bool
-
-	// tableAliasMap is used for storing the unique alias for each table in a query
-	// The key is the table name and the value is the alias
-	// For a table "users", the alias can be "u0". If there are multiple tables starting with the same letter, the alias can be "u0", "u1", "u2", etc.
-	tableAliasMap   map[string]string
-	relationStrings []string
-}
-
-type Modeler interface {
-	PrimaryKey() []string
-}
-
-type BaseModel struct{}
-
-func (m *BaseModel) PrimaryKey() []string {
-	return []string{"id"}
-}
-
-type AutoIncr struct {
-	ID uint64 `db:"id"`
 }
 
 // ====================================
@@ -88,6 +80,14 @@ type User struct {
 	CreatedAt time.Time `db:"created_at"`
 
 	Posts []Post
+}
+
+func (u *User) Columns() map[string]interface{} {
+	return map[string]interface{}{
+		"id":         u.ID,
+		"name":       u.Name,
+		"created_at": u.CreatedAt,
+	}
 }
 
 type Post struct {
@@ -114,7 +114,6 @@ type BuilderCreateTable struct {
 }
 
 type BuilderSelect struct {
-	conn *Connection
 	*sqlbuilder.SelectBuilder
 }
 
@@ -130,8 +129,16 @@ type BuilderDelete struct {
 	*sqlbuilder.DeleteBuilder
 }
 
-func NewQueryBuilder(conn *Connection) *QueryBuilder {
-	return &QueryBuilder{conn: conn}
+func NewQueryBuilder(conn *Connection, builder ...Builder) *QueryBuilder {
+	qb := &QueryBuilder{conn: conn}
+
+	if len(builder) > 0 {
+		qb.builder = builder[0]
+	} else {
+		qb.builder = SelectBuilder(conn.ConnName)
+	}
+
+	return qb
 }
 
 func (qb *QueryBuilder) Table(name string) *QueryBuilder {
@@ -303,6 +310,13 @@ func (qb *QueryBuilder) Debug(log bool) *QueryBuilder {
 	return qb
 }
 
+func (qb *QueryBuilder) FindOne(columnMap ...map[string]interface{}) {
+	sqlStmt, args := qb.builder.Build()
+	if qb.debug {
+		pp.Println(sqlStmt, args)
+	}
+}
+
 func StructBuilder(structValue interface{}, connName ...string) *BuilderStruct {
 	builder := sqlbuilder.NewStruct(structValue)
 	switch Get(connName...).Config.Driver {
@@ -334,11 +348,11 @@ func SelectBuilder(connName ...string) *BuilderSelect {
 	conn := Get(connName...)
 	switch conn.Config.Driver {
 	case DialectSQLite:
-		return &BuilderSelect{conn, sqlbuilder.SQLite.NewSelectBuilder()}
+		return &BuilderSelect{sqlbuilder.SQLite.NewSelectBuilder()}
 	case DialectMySQL:
-		return &BuilderSelect{conn, sqlbuilder.MySQL.NewSelectBuilder()}
+		return &BuilderSelect{sqlbuilder.MySQL.NewSelectBuilder()}
 	case DialectPgSQL:
-		return &BuilderSelect{conn, sqlbuilder.PostgreSQL.NewSelectBuilder()}
+		return &BuilderSelect{sqlbuilder.PostgreSQL.NewSelectBuilder()}
 	default:
 		panic("unsupported driver")
 	}

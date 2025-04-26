@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/k0kubun/pp/v3"
+	"github.com/lemmego/db/model"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -102,7 +103,7 @@ func createCommentsTable(db *sql.DB) error {
 	return nil
 }
 
-func TestFind(t *testing.T) {
+func TestFetch(t *testing.T) {
 	db := setupDb(DialectSQLite)
 
 	ib, args := InsertBuilder().InsertInto("users").
@@ -142,14 +143,31 @@ func TestFind(t *testing.T) {
 
 	//var users []User
 
+	type userSchema struct {
+		ID   *model.Column[User, uint64]
+		Name *model.Column[User, string]
+	}
+
+	var userModel = model.Define(model.Definition[User, userSchema]{
+		Table: "users",
+		Schema: userSchema{
+			ID: model.Col("id", func(m *User) uint64 {
+				return m.ID
+			}),
+		},
+	})
+
+	var user *User
+
 	result, err := Query().
 		Table("users").
 		Select("*").
-		Debug(true).
-		Where(Like("name", "%John%")).
-		Offset(0).
-		Limit(2).
-		Fetch()
+		Debug(true).Fetch()
+	// FindOne(&user.Columns())
+	//Where(Like("name", "%John%")).
+	//Offset(0).
+	//Limit(2).
+	// Fetch()
 
 	if err != nil {
 		t.Errorf(err.Error())
