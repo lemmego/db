@@ -5,11 +5,37 @@ import (
 	"os"
 	"strconv"
 	"testing"
+	"time"
 
-	"github.com/k0kubun/pp/v3"
-	"github.com/lemmego/db/model"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// =======================TestModels=========================
+
+type User struct {
+	ID        uint64    `db:"id"`
+	Name      string    `db:"name"`
+	CreatedAt time.Time `db:"created_at"`
+
+	Posts []*Post
+}
+
+type Post struct {
+	ID     uint64 `db:"id"`
+	UserID uint64 `db:"user_id"`
+	Title  string `db:"title"`
+	Body   string `db:"body"`
+
+	Comments []*Comment
+}
+
+type Comment struct {
+	ID     uint64 `db:"id"`
+	PostID uint64 `db:"post_id"`
+	Body   string `db:"body"`
+}
+
+// =======================TestModels=========================
 
 func setupDb(dialect string) *Connection {
 	var config *Config
@@ -103,7 +129,7 @@ func createCommentsTable(db *sql.DB) error {
 	return nil
 }
 
-func TestFetch(t *testing.T) {
+func TestModels(t *testing.T) {
 	db := setupDb(DialectSQLite)
 
 	ib, args := InsertBuilder().InsertInto("users").
@@ -141,39 +167,17 @@ func TestFetch(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 
-	//var users []User
+	var users []User
 
-	type userSchema struct {
-		ID   *model.Column[User, uint64]
-		Name *model.Column[User, string]
-	}
-
-	var userModel = model.Define(model.Definition[User, userSchema]{
-		Table: "users",
-		Schema: userSchema{
-			ID: model.Col("id", func(m *User) uint64 {
-				return m.ID
-			}),
-		},
-	})
-
-	var user *User
-
-	result, err := Query().
+	err = Query().
 		Table("users").
 		Select("*").
-		Debug(true).Fetch()
-	// FindOne(&user.Columns())
-	//Where(Like("name", "%John%")).
-	//Offset(0).
-	//Limit(2).
-	// Fetch()
+		Debug(true).
+		Scan(&users)
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-
-	pp.Print(result)
 }
 
 func TestDatabaseSQL(t *testing.T) {

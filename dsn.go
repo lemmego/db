@@ -11,10 +11,11 @@ const (
 	DialectSQLite = "sqlite"
 	DialectMySQL  = "mysql"
 	DialectPgSQL  = "pgsql"
+	DialectMsSQL  = "mssql"
 )
 
 var (
-	supportedDialects     = []string{DialectSQLite, DialectMySQL, DialectPgSQL /*, "mssql"*/}
+	supportedDialects     = []string{DialectSQLite, DialectMySQL, DialectPgSQL, DialectMsSQL}
 	ErrUnsupportedDialect = errors.New("unsupported dialect")
 )
 
@@ -87,8 +88,8 @@ func (ds *DataSource) String() (string, error) {
 		return ds.getMysqlDSN(), nil
 	case DialectPgSQL:
 		return ds.getPostgresDSN(), nil
-	// case "mssql":
-	// 	return dsn.getMssqlDSN(), nil
+	case DialectMsSQL:
+		return ds.getMssqlDSN(), nil
 	default:
 		return "", ErrUnsupportedDialect
 	}
@@ -149,6 +150,7 @@ func (d *DataSource) getPostgresDSN() string {
 	return hostStr + portStr + userStr + passStr + dbStr + paramsStr
 }
 
-// func (d *DSN) getMssqlDSN() string {
-// 	return "sqlserver://" + d.username + ":" + d.password + "@" + d.host + ":" + string(d.port) + "?database=" + d.name
-// }
+// Example: sqlserver://username:password@localhost:1433?database=test
+func (d *DataSource) getMssqlDSN() string {
+	return "sqlserver://" + d.Username + ":" + d.Password + "@" + d.Host + ":" + string(d.Port) + "?database=" + d.Name
+}

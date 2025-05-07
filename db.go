@@ -12,6 +12,7 @@ var (
 	instance *DatabaseManager
 )
 
+// Config contains the configuration for the database connection
 type Config struct {
 	ConnName string
 	Driver   string
@@ -23,6 +24,7 @@ type Config struct {
 	Params   string
 }
 
+// DataSource represents the data source configuration for a database connection
 func (c *Config) DataSource() *DataSource {
 	return &DataSource{
 		Dialect:  c.Driver,
@@ -35,6 +37,7 @@ func (c *Config) DataSource() *DataSource {
 	}
 }
 
+// DSN returns the Data Source Name (DSN) for the database connection
 func (c *Config) DSN() string {
 	dsn, err := c.DataSource().String()
 	if err != nil {
@@ -132,11 +135,13 @@ func Get(name ...string) *Connection {
 	return conn
 }
 
+// Conn sets the given connection for the QueryBuilder
 func (qb *QueryBuilder) Conn(connName ...string) *QueryBuilder {
 	qb.conn = Get(connName...)
 	return qb
 }
 
+// Query creates a new QueryBuilder instance with the specified connection
 func Query(connName ...string) *QueryBuilder {
 	conn := Get(connName...)
 	return NewQueryBuilder(conn, SelectBuilder(conn.ConnName))

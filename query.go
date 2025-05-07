@@ -1,20 +1,12 @@
 package db
 
 import (
-	"database/sql"
-	"time"
-
 	"github.com/k0kubun/pp/v3"
 
 	"github.com/huandu/go-sqlbuilder"
 )
 
-type DBResult struct {
-	RowsAffected int64
-	LastInsertId int64
-	Rows         *sql.Rows
-}
-
+// Cond interface contains the convenience methods for building SQL conditions.
 type Cond interface {
 	Equal(field string, value interface{}) string
 	E(field string, value interface{}) string
@@ -57,14 +49,12 @@ type Cond interface {
 	Var(value interface{}) string
 }
 
+// Builder provides the common query builder methods.
 type Builder interface {
 	sqlbuilder.Builder
 }
 
-type Struct struct {
-	*sqlbuilder.Struct
-}
-
+// QueryBuilder provides many convenient query building functionalities.
 type QueryBuilder struct {
 	conn      *Connection
 	builder   Builder
@@ -72,63 +62,37 @@ type QueryBuilder struct {
 	debug     bool
 }
 
-// ====================================
-
-type User struct {
-	ID        uint64    `db:"id"`
-	Name      string    `db:"name"`
-	CreatedAt time.Time `db:"created_at"`
-
-	Posts []Post
-}
-
-func (u *User) Columns() map[string]interface{} {
-	return map[string]interface{}{
-		"id":         u.ID,
-		"name":       u.Name,
-		"created_at": u.CreatedAt,
-	}
-}
-
-type Post struct {
-	ID     uint64 `db:"id"`
-	UserID uint64 `db:"user_id"`
-	Title  string `db:"title"`
-	Body   string `db:"body"`
-
-	Comments []Comment
-}
-
-type Comment struct {
-	ID     uint64 `db:"id"`
-	PostID uint64 `db:"post_id"`
-	Body   string `db:"body"`
-}
-
+// BuilderStruct provides common methods for building SQL queries using a struct.
 type BuilderStruct struct {
 	*sqlbuilder.Struct
 }
 
+// BuilderCreateTable provides the query builder methods for creating tables.
 type BuilderCreateTable struct {
 	*sqlbuilder.CreateTableBuilder
 }
 
+// BuilderSelect provides the query builder methods for selecting.
 type BuilderSelect struct {
 	*sqlbuilder.SelectBuilder
 }
 
+// BuilderInsert provides the query builder methods for inserting.
 type BuilderInsert struct {
 	*sqlbuilder.InsertBuilder
 }
 
+// BuilderUpdate provides the query builder methods for updating.
 type BuilderUpdate struct {
 	*sqlbuilder.UpdateBuilder
 }
 
+// BuilderDelete provides the query builder methods for deleting.
 type BuilderDelete struct {
 	*sqlbuilder.DeleteBuilder
 }
 
+// NewQueryBuilder creates a new QueryBuilder instance.
 func NewQueryBuilder(conn *Connection, builder ...Builder) *QueryBuilder {
 	qb := &QueryBuilder{conn: conn}
 
@@ -141,51 +105,71 @@ func NewQueryBuilder(conn *Connection, builder ...Builder) *QueryBuilder {
 	return qb
 }
 
+// Table sets the table name for the query builder.
 func (qb *QueryBuilder) Table(name string) *QueryBuilder {
 	qb.tableName = name
 	return qb
 }
 
+// Join adds a JOIN clause to the query builder.
 func (qb *QueryBuilder) Join(table string, onExpr ...string) *QueryBuilder {
 	qb.builder.(*BuilderSelect).Join(table, onExpr...)
 	return qb
 }
 
+// Select sets the SELECT clause for the query builder.
 func (qb *QueryBuilder) Select(col ...string) *QueryBuilder {
 	qb.SetBuilder(SelectBuilder(qb.conn.ConnName))
 	qb.builder.(*BuilderSelect).Select(col...).From(qb.tableName)
 	return qb
 }
 
+// SetBuilder sets the builder for the query builder.
 func (qb *QueryBuilder) SetBuilder(builder Builder) *QueryBuilder {
 	qb.builder = builder
 	return qb
 }
 
+// GetBuilder returns the current builder.
 func (qb *QueryBuilder) GetBuilder() Builder {
 	return qb.builder
 }
 
+// AsCreateTable returns the builder as a CreateTable builder.
 func (qb *QueryBuilder) AsCreateTable() *BuilderCreateTable {
 	return qb.builder.(*BuilderCreateTable)
 }
 
+// AsSelect returns the builder as a Select builder.
 func (qb *QueryBuilder) AsSelect() *BuilderSelect {
 	return qb.builder.(*BuilderSelect)
 }
 
+// AsInsert returns the builder as an Insert builder.
 func (qb *QueryBuilder) AsInsert() *BuilderInsert {
 	return qb.builder.(*BuilderInsert)
 }
 
+// AsUpdate returns the builder as an Update builder.
 func (qb *QueryBuilder) AsUpdate() *BuilderUpdate {
 	return qb.builder.(*BuilderUpdate)
 }
 
+// AsDelete returns the builder as a Delete builder.
 func (qb *QueryBuilder) AsDelete() *BuilderDelete {
 	return qb.builder.(*BuilderDelete)
 }
 
+// Build builds the SQL statement and its arguments.
+func (qb *QueryBuilder) Build() (string, []interface{}) {
+	sqlStmt, args := qb.builder.Build()
+	if qb.debug {
+		pp.Println(sqlStmt, args)
+	}
+	return sqlStmt, args
+}
+
+// Where adds a WHERE clause to the query builder.
 func (qb *QueryBuilder) Where(condFuncs ...ConditionFunc) *QueryBuilder {
 	for _, condFunc := range condFuncs {
 		switch builder := qb.builder.(type) {
@@ -201,6 +185,7 @@ func (qb *QueryBuilder) Where(condFuncs ...ConditionFunc) *QueryBuilder {
 	return qb
 }
 
+// OrderBy adds an ORDER BY clause to the query builder.
 func (qb *QueryBuilder) OrderBy(col ...string) *QueryBuilder {
 	switch builder := qb.builder.(type) {
 	case *BuilderSelect:
@@ -214,6 +199,7 @@ func (qb *QueryBuilder) OrderBy(col ...string) *QueryBuilder {
 	return qb
 }
 
+// Limit adds a LIMIT clause to the query builder.
 func (qb *QueryBuilder) Limit(limit int) *QueryBuilder {
 	switch builder := qb.builder.(type) {
 	case *BuilderSelect:
@@ -227,6 +213,7 @@ func (qb *QueryBuilder) Limit(limit int) *QueryBuilder {
 	return qb
 }
 
+// Offset adds an OFFSET clause to the query builder.
 func (qb *QueryBuilder) Offset(offset int) *QueryBuilder {
 	switch builder := qb.builder.(type) {
 	case *BuilderSelect:
@@ -236,6 +223,7 @@ func (qb *QueryBuilder) Offset(offset int) *QueryBuilder {
 	return qb
 }
 
+// GroupBy adds a GROUP BY clause to the query builder.
 func (qb *QueryBuilder) GroupBy(col ...string) *QueryBuilder {
 	switch builder := qb.builder.(type) {
 	case *BuilderSelect:
@@ -245,6 +233,7 @@ func (qb *QueryBuilder) GroupBy(col ...string) *QueryBuilder {
 	return qb
 }
 
+// Having adds a HAVING clause to the query builder.
 func (qb *QueryBuilder) Having(condFuncs ...ConditionFunc) *QueryBuilder {
 	for _, condFunc := range condFuncs {
 		switch builder := qb.builder.(type) {
@@ -256,6 +245,7 @@ func (qb *QueryBuilder) Having(condFuncs ...ConditionFunc) *QueryBuilder {
 	return qb
 }
 
+// Fetch executes the query and returns the results as a slice of maps.
 func (qb *QueryBuilder) Fetch() ([]map[string]interface{}, error) {
 	sqlStmt, args := qb.builder.Build()
 	if qb.debug {
@@ -305,18 +295,23 @@ func (qb *QueryBuilder) Fetch() ([]map[string]interface{}, error) {
 	return results, nil
 }
 
+// Debug enables or disables debug mode for the query builder.
 func (qb *QueryBuilder) Debug(log bool) *QueryBuilder {
 	qb.debug = log
 	return qb
 }
 
-func (qb *QueryBuilder) FindOne(columnMap ...map[string]interface{}) {
-	sqlStmt, args := qb.builder.Build()
+// Scan executes the query and scans the results into the provided destination.
+func (qb *QueryBuilder) Scan(dest interface{}) error {
+	query, args := qb.builder.Build()
 	if qb.debug {
-		pp.Println(sqlStmt, args)
+		pp.Println(query, args)
 	}
+
+	return qb.conn.DB.Select(dest, query, args...)
 }
 
+// StructBuilder creates a new Struct builder for the given struct value.
 func StructBuilder(structValue interface{}, connName ...string) *BuilderStruct {
 	builder := sqlbuilder.NewStruct(structValue)
 	switch Get(connName...).Config.Driver {
@@ -326,11 +321,14 @@ func StructBuilder(structValue interface{}, connName ...string) *BuilderStruct {
 		return &BuilderStruct{builder.For(sqlbuilder.MySQL)}
 	case DialectPgSQL:
 		return &BuilderStruct{builder.For(sqlbuilder.PostgreSQL)}
+	case DialectMsSQL:
+		return &BuilderStruct{builder.For(sqlbuilder.SQLServer)}
 	default:
 		panic("unsupported driver")
 	}
 }
 
+// CreateTableBuilder creates a new CreateTable builder.
 func CreateTableBuilder(connName ...string) *BuilderCreateTable {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
@@ -339,11 +337,14 @@ func CreateTableBuilder(connName ...string) *BuilderCreateTable {
 		return &BuilderCreateTable{sqlbuilder.MySQL.NewCreateTableBuilder()}
 	case DialectPgSQL:
 		return &BuilderCreateTable{sqlbuilder.PostgreSQL.NewCreateTableBuilder()}
+	case DialectMsSQL:
+		return &BuilderCreateTable{sqlbuilder.SQLServer.NewCreateTableBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
+// SelectBuilder creates a new Select builder.
 func SelectBuilder(connName ...string) *BuilderSelect {
 	conn := Get(connName...)
 	switch conn.Config.Driver {
@@ -353,11 +354,14 @@ func SelectBuilder(connName ...string) *BuilderSelect {
 		return &BuilderSelect{sqlbuilder.MySQL.NewSelectBuilder()}
 	case DialectPgSQL:
 		return &BuilderSelect{sqlbuilder.PostgreSQL.NewSelectBuilder()}
+	case DialectMsSQL:
+		return &BuilderSelect{sqlbuilder.SQLServer.NewSelectBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
+// InsertBuilder creates a new Insert builder.
 func InsertBuilder(connName ...string) *BuilderInsert {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
@@ -366,11 +370,14 @@ func InsertBuilder(connName ...string) *BuilderInsert {
 		return &BuilderInsert{sqlbuilder.MySQL.NewInsertBuilder()}
 	case DialectPgSQL:
 		return &BuilderInsert{sqlbuilder.PostgreSQL.NewInsertBuilder()}
+	case DialectMsSQL:
+		return &BuilderInsert{sqlbuilder.SQLServer.NewInsertBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
+// UpdateBuilder creates a new Update builder.
 func UpdateBuilder(connName ...string) *BuilderUpdate {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
@@ -379,11 +386,14 @@ func UpdateBuilder(connName ...string) *BuilderUpdate {
 		return &BuilderUpdate{sqlbuilder.MySQL.NewUpdateBuilder()}
 	case DialectPgSQL:
 		return &BuilderUpdate{sqlbuilder.PostgreSQL.NewUpdateBuilder()}
+	case DialectMsSQL:
+		return &BuilderUpdate{sqlbuilder.SQLServer.NewUpdateBuilder()}
 	default:
 		panic("unsupported driver")
 	}
 }
 
+// DeleteBuilder creates a new Delete builder.
 func DeleteBuilder(connName ...string) *BuilderDelete {
 	switch Get(connName...).Config.Driver {
 	case DialectSQLite:
@@ -392,6 +402,8 @@ func DeleteBuilder(connName ...string) *BuilderDelete {
 		return &BuilderDelete{sqlbuilder.MySQL.NewDeleteBuilder()}
 	case DialectPgSQL:
 		return &BuilderDelete{sqlbuilder.PostgreSQL.NewDeleteBuilder()}
+	case DialectMsSQL:
+		return &BuilderDelete{sqlbuilder.SQLServer.NewDeleteBuilder()}
 	default:
 		panic("unsupported driver")
 	}
