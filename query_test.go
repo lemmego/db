@@ -305,22 +305,177 @@ func TestInsert(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
-	// TODO: Update this
-	db := setupDb(DialectSQLite)
+	setupDb(DialectSQLite)
 
-	ub := NewQueryBuilder(db, UpdateBuilder()).AsUpdate()
+	// Insert test user
+	user := &User{ID: 1, Name: "Original Name", CreatedAt: time.Now()}
+	err := Save(user)
+	if err != nil {
+		t.Errorf("Failed to save user: %v", err)
+	}
 
-	//ub := UpdateBuilder()
-	db.Exec(
-		ub.Update("users").Set(ub.Assign("foo", "bar")).Build(),
-	)
+	// Verify user was inserted
+	var savedUser User
+	err = Get().Get(&savedUser, "SELECT * FROM users WHERE id = ?", user.ID)
+	if err != nil {
+		t.Errorf("Failed to get user: %v", err)
+	}
+	if savedUser.Name != "Original Name" {
+		t.Errorf("Expected user name to be 'Original Name', got '%s'", savedUser.Name)
+	}
+
+	// Update user
+	updatedUser := savedUser
+	updatedUser.Name = "Updated Name"
+	err = Update(&updatedUser)
+	if err != nil {
+		t.Errorf("Failed to update user: %v", err)
+	}
+
+	// Verify user was updated
+	var verifyUser User
+	err = Get().Get(&verifyUser, "SELECT * FROM users WHERE id = ?", user.ID)
+	if err != nil {
+		t.Errorf("Failed to get updated user: %v", err)
+	}
+	if verifyUser.Name != "Updated Name" {
+		t.Errorf("Expected user name to be 'Updated Name', got '%s'", verifyUser.Name)
+	}
+}
+
+func TestUpdateMany(t *testing.T) {
+	setupDb(DialectSQLite)
+
+	// Insert test users
+	users := []*User{
+		{ID: 10, Name: "User One", CreatedAt: time.Now()},
+		{ID: 20, Name: "User Two", CreatedAt: time.Now()},
+		{ID: 30, Name: "User Three", CreatedAt: time.Now()},
+	}
+
+	err := SaveAll(users)
+	if err != nil {
+		t.Errorf("Failed to save users: %v", err)
+	}
+
+	// Verify users were inserted
+	var savedUsers []User
+	err = Get().Select(&savedUsers, "SELECT * FROM users WHERE id IN (10, 20, 30) ORDER BY id")
+	if err != nil {
+		t.Errorf("Failed to get users: %v", err)
+	}
+	if len(savedUsers) != 3 {
+		t.Errorf("Expected 3 users, got %d", len(savedUsers))
+	}
+
+	// Update users
+	updatedUsers := []User{
+		{ID: 10, Name: "Updated One", CreatedAt: savedUsers[0].CreatedAt},
+		{ID: 20, Name: "Updated Two", CreatedAt: savedUsers[1].CreatedAt},
+		{ID: 30, Name: "Updated Three", CreatedAt: savedUsers[2].CreatedAt},
+	}
+
+	err = UpdateMany(updatedUsers)
+	if err != nil {
+		t.Errorf("Failed to update users: %v", err)
+	}
+
+	// Verify users were updated
+	var verifyUsers []User
+	err = Get().Select(&verifyUsers, "SELECT * FROM users WHERE id IN (10, 20, 30) ORDER BY id")
+	if err != nil {
+		t.Errorf("Failed to get updated users: %v", err)
+	}
+
+	if len(verifyUsers) != 3 {
+		t.Errorf("Expected 3 updated users, got %d", len(verifyUsers))
+	}
+
+	expectedNames := []string{"Updated One", "Updated Two", "Updated Three"}
+	for i, user := range verifyUsers {
+		if user.Name != expectedNames[i] {
+			t.Errorf("Expected user name to be '%s', got '%s'", expectedNames[i], user.Name)
+		}
+	}
 }
 
 func TestDelete(t *testing.T) {
-	// TODO: Update this
-	db := setupDb(DialectSQLite)
+	setupDb(DialectSQLite)
 
-	db.Exec(
-		DeleteBuilder().DeleteFrom("users").Build(),
-	)
+	// Insert test user
+	user := &User{ID: 100, Name: "User To Delete", CreatedAt: time.Now()}
+	err := Save(user)
+	if err != nil {
+		t.Errorf("Failed to save user: %v", err)
+	}
+
+	// Verify user was inserted
+	var userCount int
+	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id = ?", user.ID)
+	if err != nil {
+		t.Errorf("Failed to count users: %v", err)
+	}
+	if userCount != 1 {
+		t.Errorf("Expected 1 user before deletion, got %d", userCount)
+	}
+
+	// Delete the user
+	err = Delete(user)
+	if err != nil {
+		t.Errorf("Failed to delete user: %v", err)
+	}
+
+	// Verify user was deleted
+	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id = ?", user.ID)
+	if err != nil {
+		t.Errorf("Failed to count users after deletion: %v", err)
+	}
+	if userCount != 0 {
+		t.Errorf("Expected 0 users after deletion, got %d", userCount)
+	}
+}
+
+func TestDeleteMany(t *testing.T) {
+	setupDb(DialectSQLite)
+
+	// Insert test users
+	users := []*User{
+		{ID: 101, Name: "Batch Delete 1", CreatedAt: time.Now()},
+		{ID: 102, Name: "Batch Delete 2", CreatedAt: time.Now()},
+		{ID: 103, Name: "Batch Delete 3", CreatedAt: time.Now()},
+	}
+
+	err := SaveAll(users)
+	if err != nil {
+		t.Errorf("Failed to save users: %v", err)
+	}
+
+	// Verify users were inserted
+	var userCount int
+	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id IN (101, 102, 103)")
+	if err != nil {
+		t.Errorf("Failed to count users: %v", err)
+	}
+	if userCount != 3 {
+		t.Errorf("Expected 3 users before deletion, got %d", userCount)
+	}
+
+	// Delete the users
+	typedUsers := make([]User, len(users))
+	for i, u := range users {
+		typedUsers[i] = User{ID: u.ID, Name: u.Name, CreatedAt: u.CreatedAt}
+	}
+	err = DeleteMany(typedUsers)
+	if err != nil {
+		t.Errorf("Failed to delete users: %v", err)
+	}
+
+	// Verify users were deleted
+	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id IN (101, 102, 103)")
+	if err != nil {
+		t.Errorf("Failed to count users after deletion: %v", err)
+	}
+	if userCount != 0 {
+		t.Errorf("Expected 0 users after deletion, got %d", userCount)
+	}
 }

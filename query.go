@@ -3,13 +3,13 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
-
-	"github.com/k0kubun/pp/v3"
 
 	"github.com/fatih/structs"
 	"github.com/huandu/go-sqlbuilder"
 	"github.com/jinzhu/inflection"
+	"github.com/k0kubun/pp/v3"
 )
 
 // Cond interface contains the convenience methods for building SQL conditions.
@@ -465,18 +465,59 @@ func SaveAllCtx[T any](ctx context.Context, models []T, connName ...string) erro
 
 func Save[T any](model T, connName ...string) error {
 	name := structs.Name(model)
+	tableName := strings.ToLower(inflection.Plural(name))
+
 	query, args := Model[T](connName...).
-		WithoutTag("pk").
 		WithoutTag("hasMany").
 		WithoutTag("hasOne").
 		WithoutTag("belongsTo").
-		InsertInto(inflection.Plural(name), model).
+		InsertInto(tableName, model).
 		Build()
+
 	_, err := Get(connName...).Exec(query, args...)
 	return err
 }
 
 func SaveAll[T any](models []T, connName ...string) error {
+	if len(models) == 0 {
+		return nil
+	}
+
+	name := structs.Name(models[0])
+	tableName := strings.ToLower(inflection.Plural(name))
+
+	ms := make([]any, len(models))
+	for i, model := range models {
+		ms[i] = model
+	}
+
+	query, args := Model[T](connName...).
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		InsertInto(tableName, ms...).
+		Build()
+
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+// Update updates a model instance in the database
+func Update[T any](model T, connName ...string) error {
+	name := structs.Name(model)
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		Update(inflection.Plural(name), model).
+		Build()
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+// UpdateMany updates multiple model instances in the database
+func UpdateMany[T any](models []T, connName ...string) error {
 	name := structs.Name(models[0])
 	ms := make([]any, len(models))
 	for i, model := range models {
@@ -487,18 +528,10 @@ func SaveAll[T any](models []T, connName ...string) error {
 		WithoutTag("hasMany").
 		WithoutTag("hasOne").
 		WithoutTag("belongsTo").
-		InsertInto(strings.ToLower(inflection.Plural(name)), ms...).
+		Update(inflection.Plural(name), ms).
 		Build()
 	_, err := Get(connName...).Exec(query, args...)
 	return err
-}
-
-func Update[T any](model T, connName ...string) error {
-	return nil
-}
-
-func UpdateMany[T any](models []T, connName ...string) error {
-	return nil
 }
 
 // getBuilderForDialect returns the appropriate builder flavor based on dialect
@@ -546,4 +579,96 @@ func DeleteBuilder(connName ...string) *BuilderDelete {
 	conn := Get(connName...)
 	flavor := getBuilderForDialect(conn.Config.Driver)
 	return &BuilderDelete{flavor.NewDeleteBuilder()}
+}
+
+// Delete deletes a model instance from the database
+func Delete[T any](model T, connName ...string) error {
+	name := structs.Name(model)
+	tableName := inflection.Plural(strings.ToLower(name))
+
+	// Find the primary key field (assumed to be the field with the "pk" tag)
+	s := structs.New(model)
+	var pkField *structs.Field
+	var pkValue interface{}
+
+	for _, field := range s.Fields() {
+		if field.Tag("fieldtag") == "pk" {
+			pkField = field
+			pkValue = field.Value()
+			break
+		}
+	}
+
+	if pkField == nil {
+		return fmt.Errorf("no primary key field found for %s", name)
+	}
+
+	// Build and execute delete query
+	deleteBuilder := DeleteBuilder(connName...)
+	query, args := deleteBuilder.
+		DeleteFrom(tableName).
+		Where(fmt.Sprintf("%s = ?", pkField.Tag("db"))).
+		Build()
+
+	// Add the parameter values
+	args = append(args, pkValue)
+
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+// DeleteMany deletes multiple model instances from the database
+func DeleteMany[T any](models []T, connName ...string) error {
+	if len(models) == 0 {
+		return nil
+	}
+
+	name := structs.Name(models[0])
+	tableName := inflection.Plural(strings.ToLower(name))
+
+	// Find the primary key field from the first model
+	s := structs.New(models[0])
+	var pkFieldName string
+
+	for _, field := range s.Fields() {
+		if field.Tag("fieldtag") == "pk" {
+			pkFieldName = field.Tag("db")
+			break
+		}
+	}
+
+	if pkFieldName == "" {
+		return fmt.Errorf("no primary key field found for %s", name)
+	}
+
+	// Extract primary key values
+	pkValues := make([]interface{}, len(models))
+	for i, model := range models {
+		s := structs.New(model)
+		for _, field := range s.Fields() {
+			if field.Tag("fieldtag") == "pk" {
+				pkValues[i] = field.Value()
+				break
+			}
+		}
+	}
+
+	// Generate placeholders for IN clause
+	placeholders := make([]string, len(pkValues))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+
+	// Build and execute delete query
+	deleteBuilder := DeleteBuilder(connName...)
+	query, args := deleteBuilder.
+		DeleteFrom(tableName).
+		Where(fmt.Sprintf("%s IN (%s)", pkFieldName, strings.Join(placeholders, ", "))).
+		Build()
+
+	// Add the parameter values
+	args = append(args, pkValues...)
+
+	_, err := Get(connName...).Exec(query, args...)
+	return err
 }
