@@ -409,19 +409,6 @@ func (qb *QueryBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	return qb.conn.ExecContext(ctx, query, args...)
 }
 
-// resolveConnName resolves the connection name for the query builder.
-func (qb *QueryBuilder) resolveConnName(connName ...string) string {
-	if len(connName) > 0 && connName[0] != "" {
-		return connName[0]
-	}
-
-	if qb.conn.ConnName != "" {
-		return qb.conn.ConnName
-	}
-
-	return "default"
-}
-
 func Find[T any](model T, connName ...string) error {
 	name := strings.ToLower(structs.Name(model))
 	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
@@ -507,33 +494,11 @@ func SaveAll[T any](models []T, connName ...string) error {
 }
 
 func Update[T any](model T, connName ...string) error {
-	name := structs.Name(model)
-	query, args := Model[T](connName...).
-		WithoutTag("pk").
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		Update(inflection.Plural(name), model).
-		Build()
-	_, err := Get(connName...).Exec(query, args...)
-	return err
+	return nil
 }
 
 func UpdateMany[T any](models []T, connName ...string) error {
-	name := structs.Name(models[0])
-	ms := make([]any, len(models))
-	for i, model := range models {
-		ms[i] = model
-	}
-	query, args := Model[T](connName...).
-		WithoutTag("pk").
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		Update(inflection.Plural(name), ms).
-		Build()
-	_, err := Get(connName...).Exec(query, args...)
-	return err
+	return nil
 }
 
 // getBuilderForDialect returns the appropriate builder flavor based on dialect
