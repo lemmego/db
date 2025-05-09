@@ -1,9 +1,15 @@
 package db
 
 import (
+	"context"
+	"database/sql"
+	"strings"
+
 	"github.com/k0kubun/pp/v3"
 
+	"github.com/fatih/structs"
 	"github.com/huandu/go-sqlbuilder"
+	"github.com/jinzhu/inflection"
 )
 
 // Cond interface contains the convenience methods for building SQL conditions.
@@ -105,6 +111,17 @@ func NewQueryBuilder(conn *Connection, builder ...Builder) *QueryBuilder {
 	return qb
 }
 
+// SetBuilder sets the builder for the query builder.
+func (qb *QueryBuilder) SetBuilder(builder Builder) *QueryBuilder {
+	qb.builder = builder
+	return qb
+}
+
+// GetBuilder returns the current builder.
+func (qb *QueryBuilder) GetBuilder() Builder {
+	return qb.builder
+}
+
 // Table sets the table name for the query builder.
 func (qb *QueryBuilder) Table(name string) *QueryBuilder {
 	qb.tableName = name
@@ -119,44 +136,81 @@ func (qb *QueryBuilder) Join(table string, onExpr ...string) *QueryBuilder {
 
 // Select sets the SELECT clause for the query builder.
 func (qb *QueryBuilder) Select(col ...string) *QueryBuilder {
-	qb.SetBuilder(SelectBuilder(qb.conn.ConnName))
-	qb.builder.(*BuilderSelect).Select(col...).From(qb.tableName)
+	sb := SelectBuilder(qb.conn.ConnName)
+	sb.Select(col...).From(qb.tableName)
+	qb.SetBuilder(sb)
 	return qb
 }
 
-// SetBuilder sets the builder for the query builder.
-func (qb *QueryBuilder) SetBuilder(builder Builder) *QueryBuilder {
-	qb.builder = builder
+// Insert sets the INSERT clause for the query builder.
+func (qb *QueryBuilder) Insert(cols []string, values [][]any) *QueryBuilder {
+	ib := InsertBuilder(qb.conn.ConnName)
+	ib.InsertInto(qb.tableName).Cols(cols...)
+	for _, value := range values {
+		ib.Values(value...)
+	}
+	qb.SetBuilder(ib)
 	return qb
 }
 
-// GetBuilder returns the current builder.
-func (qb *QueryBuilder) GetBuilder() Builder {
-	return qb.builder
+// Update sets the UPDATE clause for the query builder.
+func (qb *QueryBuilder) Update(cols []string, values [][]any) *QueryBuilder {
+	ub := UpdateBuilder(qb.conn.ConnName)
+	qb.builder.(*BuilderUpdate).Update(qb.tableName)
+	//for i, col := range cols {
+	//qb.builder.(*BuilderUpdate).Set(col, values[i])
+	//}
+	qb.SetBuilder(ub)
+	return qb
 }
 
 // AsCreateTable returns the builder as a CreateTable builder.
 func (qb *QueryBuilder) AsCreateTable() *BuilderCreateTable {
+	if qb.builder == nil {
+		ctb := CreateTableBuilder(qb.conn.ConnName)
+		qb.SetBuilder(ctb)
+		return ctb
+	}
 	return qb.builder.(*BuilderCreateTable)
 }
 
 // AsSelect returns the builder as a Select builder.
 func (qb *QueryBuilder) AsSelect() *BuilderSelect {
+	if qb.builder == nil {
+		sb := SelectBuilder(qb.conn.ConnName)
+		qb.SetBuilder(sb)
+		return sb
+	}
 	return qb.builder.(*BuilderSelect)
 }
 
 // AsInsert returns the builder as an Insert builder.
 func (qb *QueryBuilder) AsInsert() *BuilderInsert {
+	if qb.builder == nil {
+		ib := InsertBuilder(qb.conn.ConnName)
+		qb.SetBuilder(ib)
+		return ib
+	}
 	return qb.builder.(*BuilderInsert)
 }
 
 // AsUpdate returns the builder as an Update builder.
 func (qb *QueryBuilder) AsUpdate() *BuilderUpdate {
+	if qb.builder == nil {
+		ub := UpdateBuilder(qb.conn.ConnName)
+		qb.SetBuilder(ub)
+		return ub
+	}
 	return qb.builder.(*BuilderUpdate)
 }
 
 // AsDelete returns the builder as a Delete builder.
 func (qb *QueryBuilder) AsDelete() *BuilderDelete {
+	if qb.builder == nil {
+		db := DeleteBuilder(qb.conn.ConnName)
+		qb.SetBuilder(db)
+		return db
+	}
 	return qb.builder.(*BuilderDelete)
 }
 
@@ -246,13 +300,13 @@ func (qb *QueryBuilder) Having(condFuncs ...ConditionFunc) *QueryBuilder {
 }
 
 // Fetch executes the query and returns the results as a slice of maps.
-func (qb *QueryBuilder) Fetch() ([]map[string]interface{}, error) {
+func (qb *QueryBuilder) Fetch(ctx context.Context) ([]map[string]interface{}, error) {
 	sqlStmt, args := qb.builder.Build()
 	if qb.debug {
 		pp.Println(sqlStmt, args)
 	}
 
-	rows, err := qb.conn.Query(sqlStmt, args...)
+	rows, err := qb.conn.QueryContext(ctx, sqlStmt, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -301,110 +355,230 @@ func (qb *QueryBuilder) Debug(log bool) *QueryBuilder {
 	return qb
 }
 
+// resolveTableNameFromModel resolves the table name from the model struct.
+func resolveTableNameFromModel(model any) string {
+	name := structs.Name(model)
+	tableName := inflection.Plural(name)
+	return strings.ToLower(tableName)
+}
+
+// resolveTableNameFromModels resolves the table name from the model struct.
+func resolveTableNameFromModels(models []any) string {
+	name := structs.Name(models[0])
+	tableName := inflection.Plural(name)
+	return strings.ToLower(tableName)
+}
+
 // Scan executes the query and scans the results into the provided destination.
-func (qb *QueryBuilder) Scan(dest interface{}) error {
+func (qb *QueryBuilder) Scan(ctx context.Context, dest interface{}) error {
+	if qb.tableName == "" {
+		qb.tableName = resolveTableNameFromModel(dest)
+		println("tablename", qb.tableName)
+		qb.AsSelect().Select("*").From(qb.tableName)
+	}
 	query, args := qb.builder.Build()
 	if qb.debug {
 		pp.Println(query, args)
 	}
 
-	return qb.conn.DB.Select(dest, query, args...)
+	return qb.conn.GetContext(ctx, dest, query, args...)
 }
 
-// StructBuilder creates a new Struct builder for the given struct value.
-func StructBuilder(structValue interface{}, connName ...string) *BuilderStruct {
-	builder := sqlbuilder.NewStruct(structValue)
-	switch Get(connName...).Config.Driver {
-	case DialectSQLite:
-		return &BuilderStruct{builder.For(sqlbuilder.SQLite)}
-	case DialectMySQL:
-		return &BuilderStruct{builder.For(sqlbuilder.MySQL)}
-	case DialectPgSQL:
-		return &BuilderStruct{builder.For(sqlbuilder.PostgreSQL)}
-	case DialectMsSQL:
-		return &BuilderStruct{builder.For(sqlbuilder.SQLServer)}
-	default:
-		panic("unsupported driver")
+// ScanAll executes the query and scans the results into the provided destination.
+func (qb *QueryBuilder) ScanAll(ctx context.Context, dest interface{}) error {
+	if qb.tableName == "" {
+		qb.tableName = resolveTableNameFromModels(dest.([]any))
+		println("tablename", qb.tableName)
+		qb.AsSelect().Select("*").From(qb.tableName)
 	}
+	query, args := qb.builder.Build()
+	if qb.debug {
+		pp.Println(query, args)
+	}
+
+	return qb.conn.SelectContext(ctx, dest, query, args...)
+}
+
+// Exec executes the query and returns the result.
+func (qb *QueryBuilder) Exec(ctx context.Context) (sql.Result, error) {
+	query, args := qb.builder.Build()
+	if qb.debug {
+		pp.Println(query, args)
+	}
+
+	return qb.conn.ExecContext(ctx, query, args...)
+}
+
+// resolveConnName resolves the connection name for the query builder.
+func (qb *QueryBuilder) resolveConnName(connName ...string) string {
+	if len(connName) > 0 && connName[0] != "" {
+		return connName[0]
+	}
+
+	if qb.conn.ConnName != "" {
+		return qb.conn.ConnName
+	}
+
+	return "default"
+}
+
+func Find[T any](model T, connName ...string) error {
+	name := strings.ToLower(structs.Name(model))
+	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
+	err := Get(connName...).Get(model, query, args...)
+	return err
+}
+
+func FindCtx[T any](ctx context.Context, model T, connName ...string) error {
+	name := strings.ToLower(structs.Name(model))
+	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
+	err := Get(connName...).GetContext(ctx, model, query, args...)
+	return err
+}
+
+func FindAll[T any](models []T, connName ...string) error {
+	name := strings.ToLower(structs.Name(models[0]))
+	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
+	err := Get(connName...).Select(models, query, args...)
+	return err
+}
+
+func FindAllCtx[T any](ctx context.Context, models []T, connName ...string) error {
+	name := strings.ToLower(structs.Name(models[0]))
+	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
+	err := Get(connName...).SelectContext(ctx, models, query, args...)
+	return err
+}
+
+func SaveCtx[T any](ctx context.Context, model T, connName ...string) error {
+	name := structs.Name(model)
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		InsertInto(inflection.Plural(name), model).
+		Build()
+	_, err := Get(connName...).ExecContext(ctx, query, args...)
+	return err
+}
+
+func SaveAllCtx[T any](ctx context.Context, models []T, connName ...string) error {
+	name := structs.Name(models[0])
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		InsertInto(inflection.Plural(name), models).
+		Build()
+	_, err := Get(connName...).ExecContext(ctx, query, args...)
+	return err
+}
+
+func Save[T any](model T, connName ...string) error {
+	name := structs.Name(model)
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		InsertInto(inflection.Plural(name), model).
+		Build()
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+func SaveAll[T any](models []T, connName ...string) error {
+	name := structs.Name(models[0])
+	ms := make([]any, len(models))
+	for i, model := range models {
+		ms[i] = model
+	}
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		InsertInto(strings.ToLower(inflection.Plural(name)), ms...).
+		Build()
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+func Update[T any](model T, connName ...string) error {
+	name := structs.Name(model)
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		Update(inflection.Plural(name), model).
+		Build()
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+func UpdateMany[T any](models []T, connName ...string) error {
+	name := structs.Name(models[0])
+	ms := make([]any, len(models))
+	for i, model := range models {
+		ms[i] = model
+	}
+	query, args := Model[T](connName...).
+		WithoutTag("pk").
+		WithoutTag("hasMany").
+		WithoutTag("hasOne").
+		WithoutTag("belongsTo").
+		Update(inflection.Plural(name), ms).
+		Build()
+	_, err := Get(connName...).Exec(query, args...)
+	return err
+}
+
+// getBuilderForDialect returns the appropriate builder flavor based on dialect
+func getBuilderForDialect(driver string) sqlbuilder.Flavor {
+	return GetFlavorForDialect(driver)
+}
+
+// Model creates a new Struct builder for the given struct value.
+func Model[T any](connName ...string) *BuilderStruct {
+	var structValue T
+	builder := sqlbuilder.NewStruct(structValue)
+	return &BuilderStruct{builder.For(getBuilderForDialect(Get(connName...).Config.Driver))}
 }
 
 // CreateTableBuilder creates a new CreateTable builder.
 func CreateTableBuilder(connName ...string) *BuilderCreateTable {
-	switch Get(connName...).Config.Driver {
-	case DialectSQLite:
-		return &BuilderCreateTable{sqlbuilder.SQLite.NewCreateTableBuilder()}
-	case DialectMySQL:
-		return &BuilderCreateTable{sqlbuilder.MySQL.NewCreateTableBuilder()}
-	case DialectPgSQL:
-		return &BuilderCreateTable{sqlbuilder.PostgreSQL.NewCreateTableBuilder()}
-	case DialectMsSQL:
-		return &BuilderCreateTable{sqlbuilder.SQLServer.NewCreateTableBuilder()}
-	default:
-		panic("unsupported driver")
-	}
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderCreateTable{flavor.NewCreateTableBuilder()}
 }
 
 // SelectBuilder creates a new Select builder.
 func SelectBuilder(connName ...string) *BuilderSelect {
 	conn := Get(connName...)
-	switch conn.Config.Driver {
-	case DialectSQLite:
-		return &BuilderSelect{sqlbuilder.SQLite.NewSelectBuilder()}
-	case DialectMySQL:
-		return &BuilderSelect{sqlbuilder.MySQL.NewSelectBuilder()}
-	case DialectPgSQL:
-		return &BuilderSelect{sqlbuilder.PostgreSQL.NewSelectBuilder()}
-	case DialectMsSQL:
-		return &BuilderSelect{sqlbuilder.SQLServer.NewSelectBuilder()}
-	default:
-		panic("unsupported driver")
-	}
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderSelect{flavor.NewSelectBuilder()}
 }
 
 // InsertBuilder creates a new Insert builder.
 func InsertBuilder(connName ...string) *BuilderInsert {
-	switch Get(connName...).Config.Driver {
-	case DialectSQLite:
-		return &BuilderInsert{sqlbuilder.SQLite.NewInsertBuilder()}
-	case DialectMySQL:
-		return &BuilderInsert{sqlbuilder.MySQL.NewInsertBuilder()}
-	case DialectPgSQL:
-		return &BuilderInsert{sqlbuilder.PostgreSQL.NewInsertBuilder()}
-	case DialectMsSQL:
-		return &BuilderInsert{sqlbuilder.SQLServer.NewInsertBuilder()}
-	default:
-		panic("unsupported driver")
-	}
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderInsert{flavor.NewInsertBuilder()}
 }
 
 // UpdateBuilder creates a new Update builder.
 func UpdateBuilder(connName ...string) *BuilderUpdate {
-	switch Get(connName...).Config.Driver {
-	case DialectSQLite:
-		return &BuilderUpdate{sqlbuilder.SQLite.NewUpdateBuilder()}
-	case DialectMySQL:
-		return &BuilderUpdate{sqlbuilder.MySQL.NewUpdateBuilder()}
-	case DialectPgSQL:
-		return &BuilderUpdate{sqlbuilder.PostgreSQL.NewUpdateBuilder()}
-	case DialectMsSQL:
-		return &BuilderUpdate{sqlbuilder.SQLServer.NewUpdateBuilder()}
-	default:
-		panic("unsupported driver")
-	}
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderUpdate{flavor.NewUpdateBuilder()}
 }
 
 // DeleteBuilder creates a new Delete builder.
 func DeleteBuilder(connName ...string) *BuilderDelete {
-	switch Get(connName...).Config.Driver {
-	case DialectSQLite:
-		return &BuilderDelete{sqlbuilder.SQLite.NewDeleteBuilder()}
-	case DialectMySQL:
-		return &BuilderDelete{sqlbuilder.MySQL.NewDeleteBuilder()}
-	case DialectPgSQL:
-		return &BuilderDelete{sqlbuilder.PostgreSQL.NewDeleteBuilder()}
-	case DialectMsSQL:
-		return &BuilderDelete{sqlbuilder.SQLServer.NewDeleteBuilder()}
-	default:
-		panic("unsupported driver")
-	}
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderDelete{flavor.NewDeleteBuilder()}
 }

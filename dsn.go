@@ -7,15 +7,7 @@ import (
 	"strings"
 )
 
-const (
-	DialectSQLite = "sqlite"
-	DialectMySQL  = "mysql"
-	DialectPgSQL  = "pgsql"
-	DialectMsSQL  = "mssql"
-)
-
 var (
-	supportedDialects     = []string{DialectSQLite, DialectMySQL, DialectPgSQL, DialectMsSQL}
 	ErrUnsupportedDialect = errors.New("unsupported dialect")
 )
 
@@ -38,7 +30,7 @@ func (ds *DataSource) String() (string, error) {
 		return "", errors.New("Dialect is required")
 	}
 
-	if !slices.Contains(supportedDialects, dialect) {
+	if !slices.Contains(SupportedDialects, dialect) {
 		return "", ErrUnsupportedDialect
 	}
 

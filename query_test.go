@@ -1,11 +1,14 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/k0kubun/pp/v3"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -13,24 +16,24 @@ import (
 // =======================TestModels=========================
 
 type User struct {
-	ID        uint64    `db:"id"`
+	ID        uint64    `db:"id" fieldtag:"pk"`
 	Name      string    `db:"name"`
 	CreatedAt time.Time `db:"created_at"`
 
-	Posts []*Post
+	Posts []*Post `db:"posts" fieldtag:"hasMany"`
 }
 
 type Post struct {
-	ID     uint64 `db:"id"`
+	ID     uint64 `db:"id" fieldtag:"pk"`
 	UserID uint64 `db:"user_id"`
 	Title  string `db:"title"`
 	Body   string `db:"body"`
 
-	Comments []*Comment
+	Comments []*Comment `db:"comments" fieldtag:"hasMany"`
 }
 
 type Comment struct {
-	ID     uint64 `db:"id"`
+	ID     uint64 `db:"id" fieldtag:"pk"`
 	PostID uint64 `db:"post_id"`
 	Body   string `db:"body"`
 }
@@ -66,7 +69,11 @@ func setupDb(dialect string) *Connection {
 	}
 
 	conn := NewConnection(config)
-	conn.Open()
+	_, err := conn.Open()
+	if err != nil {
+		panic(err) // In tests it's acceptable to panic, but in production code we'd handle this differently
+	}
+
 	DM().Add(config.ConnName, conn)
 	createUsersTable(conn.Db())
 	createPostsTable(conn.Db())
@@ -129,39 +136,56 @@ func createCommentsTable(db *sql.DB) error {
 	return nil
 }
 
+func TestFind(t *testing.T) {
+	setupDb(DialectSQLite)
+	user := &User{Name: "John Doe", CreatedAt: time.Now()}
+	err := Save(user)
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	var foundUser User
+
+	err = Find(&foundUser)
+
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	if foundUser.Name != user.Name {
+		t.Errorf("Expected %s, got %s", user.Name, foundUser.Name)
+	}
+}
+
 func TestModels(t *testing.T) {
-	db := setupDb(DialectSQLite)
+	setupDb(DialectSQLite)
 
-	ib, args := InsertBuilder().InsertInto("users").
-		Cols("id", "name", "created_at").
-		Values(1, "John Doe", 1234567890).
-		Values(2, "Jane Doe", 1234567890).
-		Values(3, "James Doe", 1234567890).Build()
-
-	_, err := db.Exec(ib, args...)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	ib, args = InsertBuilder().InsertInto("posts").
-		Cols("id", "user_id", "title", "body").
-		Values(1, 1, "Post 1", "Lorem ipsum dolor sit amet").
-		Values(2, 1, "Post 2", "Consectetur adipiscing elit").
-		Values(3, 2, "Post 3", "A quick brown fox jumps").Build()
-
-	_, err = db.Exec(ib, args...)
+	err := SaveAll([]*User{
+		{Name: "John Doe", CreatedAt: time.Now()},
+		{Name: "Jane Doe", CreatedAt: time.Now()},
+		{Name: "James Doe", CreatedAt: time.Now()},
+	})
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	ib, args = InsertBuilder().InsertInto("comments").
-		Cols("id", "post_id", "body").
-		Values(1, 1, "Comment 1").
-		Values(2, 1, "Comment 2").
-		Values(3, 2, "Comment 3").Build()
+	err = SaveAll([]*Post{
+		{UserID: 1, Title: "Post 1", Body: "Lorem ipsum dolor sit amet"},
+		{UserID: 1, Title: "Post 2", Body: "Consectetur adipiscing elit"},
+		{UserID: 2, Title: "Post 3", Body: "A quick brown fox jumps"},
+	})
 
-	_, err = db.Exec(ib, args...)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
+	err = SaveAll([]*Comment{
+		{PostID: 1, Body: "Comment 1"},
+		{PostID: 1, Body: "Comment 2"},
+		{PostID: 2, Body: "Comment 3"},
+	})
 
 	if err != nil {
 		t.Errorf(err.Error())
@@ -170,14 +194,15 @@ func TestModels(t *testing.T) {
 	var users []User
 
 	err = Query().
-		Table("users").
 		Select("*").
 		Debug(true).
-		Scan(&users)
+		ScanAll(context.Background(), &users)
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
+
+	pp.Print(users)
 }
 
 func TestDatabaseSQL(t *testing.T) {
@@ -283,7 +308,9 @@ func TestUpdate(t *testing.T) {
 	// TODO: Update this
 	db := setupDb(DialectSQLite)
 
-	ub := UpdateBuilder()
+	ub := NewQueryBuilder(db, UpdateBuilder()).AsUpdate()
+
+	//ub := UpdateBuilder()
 	db.Exec(
 		ub.Update("users").Set(ub.Assign("foo", "bar")).Build(),
 	)

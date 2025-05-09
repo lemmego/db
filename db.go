@@ -8,8 +8,9 @@ import (
 )
 
 var (
-	once     sync.Once
-	instance *DatabaseManager
+	once                  sync.Once
+	instance              *DatabaseManager
+	ErrConnectionNotFound = errors.New("database connection not found")
 )
 
 // Config contains the configuration for the database connection
@@ -45,6 +46,11 @@ func (c *Config) DSN() string {
 	}
 
 	return dsn
+}
+
+// DSNWithError returns the Data Source Name (DSN) for the database connection and any error
+func (c *Config) DSNWithError() (string, error) {
+	return c.DataSource().String()
 }
 
 // DatabaseManager holds connections to various database instances
@@ -84,20 +90,20 @@ func (m *DatabaseManager) Get(name ...string) (*Connection, bool) {
 
 // Remove closes and removes a database connection from the manager
 func (m *DatabaseManager) Remove(name string) error {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-	conn, ok := m.Get(name)
-	if !ok {
-		return errors.New(fmt.Sprintf("database: not found %s", name))
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	conn, found := m.connections[name]
+	if !found {
+		return fmt.Errorf("%w: %s", ErrConnectionNotFound, name)
 	}
 
 	err := conn.Close()
-
 	if err != nil {
 		return err
 	}
-	delete(m.connections, name)
 
+	delete(m.connections, name)
 	return nil
 }
 
@@ -110,7 +116,7 @@ func (m *DatabaseManager) All() map[string]*Connection {
 
 // RemoveAll closes and removes all the existing connections
 func (m *DatabaseManager) RemoveAll() error {
-	for connName, _ := range m.All() {
+	for connName := range m.All() {
 		err := m.Remove(connName)
 		if err != nil {
 			return err
@@ -133,6 +139,21 @@ func Get(name ...string) *Connection {
 	}
 
 	return conn
+}
+
+// GetWithError retrieves a database connection with error handling
+func GetWithError(name ...string) (*Connection, error) {
+	connName := "default"
+	if len(name) > 0 {
+		connName = name[0]
+	}
+
+	conn, found := instance.Get(connName)
+	if !found {
+		return nil, fmt.Errorf("%w: %s", ErrConnectionNotFound, connName)
+	}
+
+	return conn, nil
 }
 
 // Conn sets the given connection for the QueryBuilder
