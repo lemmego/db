@@ -136,56 +136,40 @@ func createCommentsTable(db *sql.DB) error {
 	return nil
 }
 
-func TestFind(t *testing.T) {
-	setupDb(DialectSQLite)
-	user := &User{Name: "John Doe", CreatedAt: time.Now()}
-	err := Save(user)
-
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	var foundUser User
-
-	err = Find(&foundUser)
-
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	if foundUser.Name != user.Name {
-		t.Errorf("Expected %s, got %s", user.Name, foundUser.Name)
-	}
-}
-
 func TestModels(t *testing.T) {
 	setupDb(DialectSQLite)
 
-	err := SaveAll([]*User{
-		{Name: "John Doe", CreatedAt: time.Now()},
-		{Name: "Jane Doe", CreatedAt: time.Now()},
-		{Name: "James Doe", CreatedAt: time.Now()},
-	})
+	_, err := Query().Debug(true).
+		Table("users").
+		Insert([]string{"name", "created_at"}, [][]any{
+			{"John Doe", time.Now()},
+			{"Jane Doe", time.Now()},
+			{"James Doe", time.Now()},
+		}).Exec(context.Background())
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	err = SaveAll([]*Post{
-		{UserID: 1, Title: "Post 1", Body: "Lorem ipsum dolor sit amet"},
-		{UserID: 1, Title: "Post 2", Body: "Consectetur adipiscing elit"},
-		{UserID: 2, Title: "Post 3", Body: "A quick brown fox jumps"},
-	})
+	_, err = Query().
+		Table("posts").
+		Insert([]string{"user_id", "title", "body"}, [][]any{
+			{1, "Post 1", "Lorem ipsum dolor sit amet"},
+			{1, "Post 2", "Consectetur adipiscing elit"},
+			{2, "Post 3", "A quick brown fox jumps"},
+		}).Exec(context.Background())
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	err = SaveAll([]*Comment{
-		{PostID: 1, Body: "Comment 1"},
-		{PostID: 1, Body: "Comment 2"},
-		{PostID: 2, Body: "Comment 3"},
-	})
+	_, err = Query().
+		Table("comments").
+		Insert([]string{"post_id", "body"}, [][]any{
+			{1, "Comment 1"},
+			{1, "Comment 2"},
+			{2, "Comment 3"},
+		}).Exec(context.Background())
 
 	if err != nil {
 		t.Errorf(err.Error())
@@ -194,6 +178,7 @@ func TestModels(t *testing.T) {
 	var users []User
 
 	err = Query().
+		Table("users").
 		Select("*").
 		Debug(true).
 		ScanAll(context.Background(), &users)
@@ -205,7 +190,7 @@ func TestModels(t *testing.T) {
 	pp.Print(users)
 }
 
-func TestDatabaseSQL(t *testing.T) {
+func TestInsertBuilder(t *testing.T) {
 	db := setupDb(DialectSQLite)
 
 	ib, args := InsertBuilder().InsertInto("users").
@@ -225,257 +210,133 @@ func TestDatabaseSQL(t *testing.T) {
 		Values(2, 1, "Ipsum", "Consectetur adipiscing elit").
 		Values(3, 2, "Dolor", "A quick brown fox jumps").Build()
 
-	_, err = db.Exec(ib, args...)
+	result, err := db.Exec(ib, args...)
 
 	if err != nil {
 		t.Errorf(err.Error())
 	}
 
-	rows, err := db.Query(`
-		SELECT users.id as "users.id", users.name as "users.name", users.created_at as "users.created_at", posts.id as "posts.id" FROM users
-		LEFT JOIN posts ON users.id = posts.user_id`)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	defer rows.Close()
-
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-}
-
-func TestFirst(t *testing.T) {
-	db := setupDb(DialectSQLite)
-
-	ib, args := InsertBuilder().InsertInto("users").
-		Cols("id", "name", "created_at").
-		Values(1, "Sowren Sen", 1234567890).
-		Values(2, "Tanmay Tanmay", 1234567890).
-		Values(3, "Tanmay Das", 1234567890).Build()
-
-	_, err := db.Exec(ib, args...)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	ib, args = InsertBuilder().InsertInto("posts").
-		Cols("id", "user_id", "title", "body").
-		Values(1, 1, "Lorem", "Lorem ipsum dolor sit amet").
-		Values(2, 1, "Ipsum", "Consectetur adipiscing elit").
-		Values(3, 2, "Dolor", "A quick brown fox jumps").Build()
-
-	_, err = db.Exec(ib, args...)
-
-	if err != nil {
+	if rowCount, err := result.RowsAffected(); err != nil || rowCount != 3 {
 		t.Errorf(err.Error())
 	}
 }
 
 func TestCreateTable(t *testing.T) {
-	//db := setupDb(DialectSQLite)
+	db := setupDb(DialectSQLite)
+	ctb := CreateTableBuilder().CreateTable("users").IfNotExists()
+	ctb.Define("id", "INTEGER", "PRIMARY KEY")
+	ctb.Define("name", "VARCHAR(255)", "NOT NULL")
+	ctb.Define("created_at", "DATETIME", "NOT NULL")
+
+	q, _ := ctb.Build()
+
+	_, err := db.Exec(q)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
 }
 
 func TestSelect(t *testing.T) {
 	db := setupDb(DialectSQLite)
+	Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
+		{1, "John Doe", 1234567890},
+		{2, "Jane Doe", 1234567890},
+		{3, "James Doe", 1234567890},
+	}).Exec(context.Background())
+
 	sb, _ := SelectBuilder().Select("*").From("users").Build()
 	rows, err := db.Query(sb)
+	if err != nil {
+		t.Errorf(err.Error())
+	}
+
 	defer rows.Close()
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-}
-
-func TestInsert(t *testing.T) {
-	db := setupDb(DialectSQLite)
-
-	ib, args := InsertBuilder().InsertInto("users").
-		Cols("id", "name", "created_at").
-		Values(1, "Huan Du", 1234567890).
-		Values(2, "Charmy Liu", 1234567890).Build()
-
-	res, err := db.Exec(ib, args...)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	if rowCount, err := res.RowsAffected(); err != nil || rowCount != 2 {
-		t.Errorf(err.Error())
-	}
 }
 
 func TestUpdate(t *testing.T) {
-	setupDb(DialectSQLite)
+	db := setupDb(DialectSQLite)
+	Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
+		{1, "John Doe", 1234567890},
+		{2, "Jane Doe", 1234567890},
+		{3, "James Doe", 1234567890},
+	}).Exec(context.Background())
 
-	// Insert test user
-	user := &User{ID: 1, Name: "Original Name", CreatedAt: time.Now()}
-	err := Save(user)
+	ub := UpdateBuilder()
+
+	ub.Update("users").
+		Set(ub.Assign("name", "Jennifer Doe")).
+		Where(ub.EQ("id", 1))
+
+	query, args := ub.Build()
+
+	_, err := db.Exec(query, args...)
 	if err != nil {
-		t.Errorf("Failed to save user: %v", err)
+		t.Errorf(err.Error())
 	}
 
-	// Verify user was inserted
-	var savedUser User
-	err = Get().Get(&savedUser, "SELECT * FROM users WHERE id = ?", user.ID)
+	sb, _ := SelectBuilder().Select("*").From("users").Build()
+	rows, err := db.Query(sb)
 	if err != nil {
-		t.Errorf("Failed to get user: %v", err)
-	}
-	if savedUser.Name != "Original Name" {
-		t.Errorf("Expected user name to be 'Original Name', got '%s'", savedUser.Name)
+		t.Errorf(err.Error())
 	}
 
-	// Update user
-	updatedUser := savedUser
-	updatedUser.Name = "Updated Name"
-	err = Update(&updatedUser)
+	defer rows.Close()
+
+	var users []User
+
+	err = Query().
+		Table("users").
+		Select("*").
+		Debug(true).
+		ScanAll(context.Background(), &users)
+
 	if err != nil {
-		t.Errorf("Failed to update user: %v", err)
+		t.Errorf(err.Error())
 	}
 
-	// Verify user was updated
-	var verifyUser User
-	err = Get().Get(&verifyUser, "SELECT * FROM users WHERE id = ?", user.ID)
-	if err != nil {
-		t.Errorf("Failed to get updated user: %v", err)
-	}
-	if verifyUser.Name != "Updated Name" {
-		t.Errorf("Expected user name to be 'Updated Name', got '%s'", verifyUser.Name)
-	}
-}
-
-func TestUpdateMany(t *testing.T) {
-	setupDb(DialectSQLite)
-
-	// Insert test users
-	users := []*User{
-		{ID: 10, Name: "User One", CreatedAt: time.Now()},
-		{ID: 20, Name: "User Two", CreatedAt: time.Now()},
-		{ID: 30, Name: "User Three", CreatedAt: time.Now()},
-	}
-
-	err := SaveAll(users)
-	if err != nil {
-		t.Errorf("Failed to save users: %v", err)
-	}
-
-	// Verify users were inserted
-	var savedUsers []User
-	err = Get().Select(&savedUsers, "SELECT * FROM users WHERE id IN (10, 20, 30) ORDER BY id")
-	if err != nil {
-		t.Errorf("Failed to get users: %v", err)
-	}
-	if len(savedUsers) != 3 {
-		t.Errorf("Expected 3 users, got %d", len(savedUsers))
-	}
-
-	// Update users
-	updatedUsers := []User{
-		{ID: 10, Name: "Updated One", CreatedAt: savedUsers[0].CreatedAt},
-		{ID: 20, Name: "Updated Two", CreatedAt: savedUsers[1].CreatedAt},
-		{ID: 30, Name: "Updated Three", CreatedAt: savedUsers[2].CreatedAt},
-	}
-
-	err = UpdateMany(updatedUsers)
-	if err != nil {
-		t.Errorf("Failed to update users: %v", err)
-	}
-
-	// Verify users were updated
-	var verifyUsers []User
-	err = Get().Select(&verifyUsers, "SELECT * FROM users WHERE id IN (10, 20, 30) ORDER BY id")
-	if err != nil {
-		t.Errorf("Failed to get updated users: %v", err)
-	}
-
-	if len(verifyUsers) != 3 {
-		t.Errorf("Expected 3 updated users, got %d", len(verifyUsers))
-	}
-
-	expectedNames := []string{"Updated One", "Updated Two", "Updated Three"}
-	for i, user := range verifyUsers {
-		if user.Name != expectedNames[i] {
-			t.Errorf("Expected user name to be '%s', got '%s'", expectedNames[i], user.Name)
-		}
-	}
+	pp.Print(users)
 }
 
 func TestDelete(t *testing.T) {
-	setupDb(DialectSQLite)
+	db := setupDb(DialectSQLite)
+	Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
+		{1, "John Doe", 1234567890},
+		{2, "Jane Doe", 1234567890},
+		{3, "James Doe", 1234567890},
+	}).Exec(context.Background())
 
-	// Insert test user
-	user := &User{ID: 100, Name: "User To Delete", CreatedAt: time.Now()}
-	err := Save(user)
+	deleteBuilder := DeleteBuilder()
+	deleteBuilder.DeleteFrom("users").Where(deleteBuilder.EQ("id", 1))
+
+	query, args := deleteBuilder.Build()
+
+	_, err := db.Exec(query, args...)
 	if err != nil {
-		t.Errorf("Failed to save user: %v", err)
+		t.Errorf(err.Error())
 	}
 
-	// Verify user was inserted
-	var userCount int
-	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id = ?", user.ID)
+	sb, _ := SelectBuilder().Select("*").From("users").Build()
+	rows, err := db.Query(sb)
 	if err != nil {
-		t.Errorf("Failed to count users: %v", err)
-	}
-	if userCount != 1 {
-		t.Errorf("Expected 1 user before deletion, got %d", userCount)
+		t.Errorf(err.Error())
 	}
 
-	// Delete the user
-	err = Delete(user)
+	defer rows.Close()
+
+	var users []User
+
+	err = Query().
+		Table("users").
+		Select("*").
+		ScanAll(context.Background(), &users)
+
 	if err != nil {
-		t.Errorf("Failed to delete user: %v", err)
+		t.Errorf(err.Error())
 	}
 
-	// Verify user was deleted
-	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id = ?", user.ID)
-	if err != nil {
-		t.Errorf("Failed to count users after deletion: %v", err)
-	}
-	if userCount != 0 {
-		t.Errorf("Expected 0 users after deletion, got %d", userCount)
-	}
-}
+	pp.Print(users)
 
-func TestDeleteMany(t *testing.T) {
-	setupDb(DialectSQLite)
-
-	// Insert test users
-	users := []*User{
-		{ID: 101, Name: "Batch Delete 1", CreatedAt: time.Now()},
-		{ID: 102, Name: "Batch Delete 2", CreatedAt: time.Now()},
-		{ID: 103, Name: "Batch Delete 3", CreatedAt: time.Now()},
-	}
-
-	err := SaveAll(users)
-	if err != nil {
-		t.Errorf("Failed to save users: %v", err)
-	}
-
-	// Verify users were inserted
-	var userCount int
-	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id IN (101, 102, 103)")
-	if err != nil {
-		t.Errorf("Failed to count users: %v", err)
-	}
-	if userCount != 3 {
-		t.Errorf("Expected 3 users before deletion, got %d", userCount)
-	}
-
-	// Delete the users
-	typedUsers := make([]User, len(users))
-	for i, u := range users {
-		typedUsers[i] = User{ID: u.ID, Name: u.Name, CreatedAt: u.CreatedAt}
-	}
-	err = DeleteMany(typedUsers)
-	if err != nil {
-		t.Errorf("Failed to delete users: %v", err)
-	}
-
-	// Verify users were deleted
-	err = Get().Get(&userCount, "SELECT COUNT(*) FROM users WHERE id IN (101, 102, 103)")
-	if err != nil {
-		t.Errorf("Failed to count users after deletion: %v", err)
-	}
-	if userCount != 0 {
-		t.Errorf("Expected 0 users after deletion, got %d", userCount)
+	if len(users) != 2 {
+		t.Errorf("Users should have 2 rows")
 	}
 }

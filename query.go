@@ -3,12 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"strings"
+	"errors"
 
-	"github.com/fatih/structs"
 	"github.com/huandu/go-sqlbuilder"
-	"github.com/jinzhu/inflection"
 	"github.com/k0kubun/pp/v3"
 )
 
@@ -144,6 +141,14 @@ func (qb *QueryBuilder) Select(col ...string) *QueryBuilder {
 
 // Insert sets the INSERT clause for the query builder.
 func (qb *QueryBuilder) Insert(cols []string, values [][]any) *QueryBuilder {
+	if len(values) == 0 {
+		panic("db: values are required for Insert operation")
+	}
+
+	if qb.tableName == "" {
+		panic("db: table name is required for Insert operation")
+	}
+
 	ib := InsertBuilder(qb.conn.ConnName)
 	ib.InsertInto(qb.tableName).Cols(cols...)
 	for _, value := range values {
@@ -355,27 +360,12 @@ func (qb *QueryBuilder) Debug(log bool) *QueryBuilder {
 	return qb
 }
 
-// resolveTableNameFromModel resolves the table name from the model struct.
-func resolveTableNameFromModel(model any) string {
-	name := structs.Name(model)
-	tableName := inflection.Plural(name)
-	return strings.ToLower(tableName)
-}
-
-// resolveTableNameFromModels resolves the table name from the model struct.
-func resolveTableNameFromModels(models []any) string {
-	name := structs.Name(models[0])
-	tableName := inflection.Plural(name)
-	return strings.ToLower(tableName)
-}
-
 // Scan executes the query and scans the results into the provided destination.
 func (qb *QueryBuilder) Scan(ctx context.Context, dest interface{}) error {
 	if qb.tableName == "" {
-		qb.tableName = resolveTableNameFromModel(dest)
-		println("tablename", qb.tableName)
-		qb.AsSelect().Select("*").From(qb.tableName)
+		return errors.New("missing table name")
 	}
+
 	query, args := qb.builder.Build()
 	if qb.debug {
 		pp.Println(query, args)
@@ -387,10 +377,9 @@ func (qb *QueryBuilder) Scan(ctx context.Context, dest interface{}) error {
 // ScanAll executes the query and scans the results into the provided destination.
 func (qb *QueryBuilder) ScanAll(ctx context.Context, dest interface{}) error {
 	if qb.tableName == "" {
-		qb.tableName = resolveTableNameFromModels(dest.([]any))
-		println("tablename", qb.tableName)
-		qb.AsSelect().Select("*").From(qb.tableName)
+		return errors.New("missing table name")
 	}
+
 	query, args := qb.builder.Build()
 	if qb.debug {
 		pp.Println(query, args)
@@ -407,131 +396,6 @@ func (qb *QueryBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	}
 
 	return qb.conn.ExecContext(ctx, query, args...)
-}
-
-func Find[T any](model T, connName ...string) error {
-	name := strings.ToLower(structs.Name(model))
-	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
-	err := Get(connName...).Get(model, query, args...)
-	return err
-}
-
-func FindCtx[T any](ctx context.Context, model T, connName ...string) error {
-	name := strings.ToLower(structs.Name(model))
-	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
-	err := Get(connName...).GetContext(ctx, model, query, args...)
-	return err
-}
-
-func FindAll[T any](models []T, connName ...string) error {
-	name := strings.ToLower(structs.Name(models[0]))
-	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
-	err := Get(connName...).Select(models, query, args...)
-	return err
-}
-
-func FindAllCtx[T any](ctx context.Context, models []T, connName ...string) error {
-	name := strings.ToLower(structs.Name(models[0]))
-	query, args := NewQueryBuilder(Get(connName...)).Table(inflection.Plural(name)).Select("*").Build()
-	err := Get(connName...).SelectContext(ctx, models, query, args...)
-	return err
-}
-
-func SaveCtx[T any](ctx context.Context, model T, connName ...string) error {
-	name := structs.Name(model)
-	query, args := Model[T](connName...).
-		WithoutTag("pk").
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		InsertInto(inflection.Plural(name), model).
-		Build()
-	_, err := Get(connName...).ExecContext(ctx, query, args...)
-	return err
-}
-
-func SaveAllCtx[T any](ctx context.Context, models []T, connName ...string) error {
-	name := structs.Name(models[0])
-	query, args := Model[T](connName...).
-		WithoutTag("pk").
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		InsertInto(inflection.Plural(name), models).
-		Build()
-	_, err := Get(connName...).ExecContext(ctx, query, args...)
-	return err
-}
-
-func Save[T any](model T, connName ...string) error {
-	name := structs.Name(model)
-	tableName := strings.ToLower(inflection.Plural(name))
-
-	query, args := Model[T](connName...).
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		InsertInto(tableName, model).
-		Build()
-
-	_, err := Get(connName...).Exec(query, args...)
-	return err
-}
-
-func SaveAll[T any](models []T, connName ...string) error {
-	if len(models) == 0 {
-		return nil
-	}
-
-	name := structs.Name(models[0])
-	tableName := strings.ToLower(inflection.Plural(name))
-
-	ms := make([]any, len(models))
-	for i, model := range models {
-		ms[i] = model
-	}
-
-	query, args := Model[T](connName...).
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		InsertInto(tableName, ms...).
-		Build()
-
-	_, err := Get(connName...).Exec(query, args...)
-	return err
-}
-
-// Update updates a model instance in the database
-func Update[T any](model T, connName ...string) error {
-	name := structs.Name(model)
-	query, args := Model[T](connName...).
-		WithoutTag("pk").
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		Update(inflection.Plural(name), model).
-		Build()
-	_, err := Get(connName...).Exec(query, args...)
-	return err
-}
-
-// UpdateMany updates multiple model instances in the database
-func UpdateMany[T any](models []T, connName ...string) error {
-	name := structs.Name(models[0])
-	ms := make([]any, len(models))
-	for i, model := range models {
-		ms[i] = model
-	}
-	query, args := Model[T](connName...).
-		WithoutTag("pk").
-		WithoutTag("hasMany").
-		WithoutTag("hasOne").
-		WithoutTag("belongsTo").
-		Update(inflection.Plural(name), ms).
-		Build()
-	_, err := Get(connName...).Exec(query, args...)
-	return err
 }
 
 // getBuilderForDialect returns the appropriate builder flavor based on dialect
@@ -579,96 +443,4 @@ func DeleteBuilder(connName ...string) *BuilderDelete {
 	conn := Get(connName...)
 	flavor := getBuilderForDialect(conn.Config.Driver)
 	return &BuilderDelete{flavor.NewDeleteBuilder()}
-}
-
-// Delete deletes a model instance from the database
-func Delete[T any](model T, connName ...string) error {
-	name := structs.Name(model)
-	tableName := inflection.Plural(strings.ToLower(name))
-
-	// Find the primary key field (assumed to be the field with the "pk" tag)
-	s := structs.New(model)
-	var pkField *structs.Field
-	var pkValue interface{}
-
-	for _, field := range s.Fields() {
-		if field.Tag("fieldtag") == "pk" {
-			pkField = field
-			pkValue = field.Value()
-			break
-		}
-	}
-
-	if pkField == nil {
-		return fmt.Errorf("no primary key field found for %s", name)
-	}
-
-	// Build and execute delete query
-	deleteBuilder := DeleteBuilder(connName...)
-	query, args := deleteBuilder.
-		DeleteFrom(tableName).
-		Where(fmt.Sprintf("%s = ?", pkField.Tag("db"))).
-		Build()
-
-	// Add the parameter values
-	args = append(args, pkValue)
-
-	_, err := Get(connName...).Exec(query, args...)
-	return err
-}
-
-// DeleteMany deletes multiple model instances from the database
-func DeleteMany[T any](models []T, connName ...string) error {
-	if len(models) == 0 {
-		return nil
-	}
-
-	name := structs.Name(models[0])
-	tableName := inflection.Plural(strings.ToLower(name))
-
-	// Find the primary key field from the first model
-	s := structs.New(models[0])
-	var pkFieldName string
-
-	for _, field := range s.Fields() {
-		if field.Tag("fieldtag") == "pk" {
-			pkFieldName = field.Tag("db")
-			break
-		}
-	}
-
-	if pkFieldName == "" {
-		return fmt.Errorf("no primary key field found for %s", name)
-	}
-
-	// Extract primary key values
-	pkValues := make([]interface{}, len(models))
-	for i, model := range models {
-		s := structs.New(model)
-		for _, field := range s.Fields() {
-			if field.Tag("fieldtag") == "pk" {
-				pkValues[i] = field.Value()
-				break
-			}
-		}
-	}
-
-	// Generate placeholders for IN clause
-	placeholders := make([]string, len(pkValues))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
-
-	// Build and execute delete query
-	deleteBuilder := DeleteBuilder(connName...)
-	query, args := deleteBuilder.
-		DeleteFrom(tableName).
-		Where(fmt.Sprintf("%s IN (%s)", pkFieldName, strings.Join(placeholders, ", "))).
-		Build()
-
-	// Add the parameter values
-	args = append(args, pkValues...)
-
-	_, err := Get(connName...).Exec(query, args...)
-	return err
 }
