@@ -65,8 +65,7 @@ type QueryBuilder struct {
 	debug         bool
 	queryType     string
 	selectColumns []string
-	updateColumns []string
-	updateValues  []any
+	updatables    map[string]any
 	insertColumns []string
 	insertValues  [][]any
 }
@@ -155,11 +154,10 @@ func (qb *QueryBuilder) Insert(columns []string, values [][]any) *QueryBuilder {
 }
 
 // Update sets up an UPDATE query
-func (qb *QueryBuilder) Update(columns []string, values []any) *QueryBuilder {
+func (qb *QueryBuilder) Update(values map[string]any) *QueryBuilder {
 	qb.queryType = "UPDATE"
 	qb.builder = UpdateBuilder(qb.conn.ConnName)
-	qb.updateColumns = columns
-	qb.updateValues = values
+	qb.updatables = values
 	return qb
 }
 
@@ -262,10 +260,10 @@ func (qb *QueryBuilder) Build() (string, []any) {
 		if qb.tableName != "" {
 			ub.Update(qb.tableName)
 		}
-		if len(qb.updateColumns) > 0 && len(qb.updateValues) > 0 {
-			assignments := make([]string, len(qb.updateColumns))
-			for i, col := range qb.updateColumns {
-				assignments[i] = ub.Assign(col, qb.updateValues[i])
+		if len(qb.updatables) > 0 {
+			assignments := make([]string, 0, len(qb.updatables))
+			for col, val := range qb.updatables {
+				assignments = append(assignments, ub.Assign(col, val))
 			}
 			ub.Set(assignments...)
 		}
@@ -301,7 +299,7 @@ func (qb *QueryBuilder) Build() (string, []any) {
 }
 
 // Where adds a WHERE clause to the query
-func (qb *QueryBuilder) Where(condition ConditionFunc) *QueryBuilder {
+func (qb *QueryBuilder) Where(conditions ...ConditionFunc) *QueryBuilder {
 	if qb.builder == nil {
 		switch qb.queryType {
 		case "SELECT":
@@ -314,14 +312,18 @@ func (qb *QueryBuilder) Where(condition ConditionFunc) *QueryBuilder {
 			qb.builder = SelectBuilder(qb.conn.ConnName)
 		}
 	}
+	conditionsStr := make([]string, len(conditions))
+	for i, cond := range conditions {
+		conditionsStr[i] = cond(qb.builder)
+	}
 	// Call the builder's Where method
 	switch b := qb.builder.(type) {
 	case *BuilderSelect:
-		b.Where(condition(qb.builder))
+		b.Where(conditionsStr...)
 	case *BuilderUpdate:
-		b.Where(condition(qb.builder))
+		b.Where(conditionsStr...)
 	case *BuilderDelete:
-		b.Where(condition(qb.builder))
+		b.Where(conditionsStr...)
 	}
 	return qb
 }

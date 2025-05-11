@@ -29,8 +29,8 @@ func NewConnection(config *Config) *Connection {
 	return &Connection{Config: config, DB: nil, stdDb: nil, builder: nil, Error: nil, tx: nil}
 }
 
-// Db returns the standard sql.DB connection
-func (c *Connection) Db() *sql.DB {
+// GetDB returns the standard sql.DB connection
+func (c *Connection) GetDB() *sql.DB {
 	return c.stdDb
 }
 
@@ -46,7 +46,7 @@ func (c *Connection) Open() (*sql.DB, error) {
 	c.stdDb = db
 	c.DB = sqlx.NewDb(c.stdDb, c.Config.Driver)
 
-	return c.Db(), nil
+	return c.GetDB(), nil
 }
 
 // Close closes the database connection

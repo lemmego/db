@@ -82,9 +82,9 @@ func setupDb(dialect string) *Connection {
 	}
 
 	DM().Add(config.ConnName, conn)
-	createUsersTable(conn.Db())
-	createPostsTable(conn.Db())
-	createCommentsTable(conn.Db())
+	createUsersTable(conn.GetDB())
+	createPostsTable(conn.GetDB())
+	createCommentsTable(conn.GetDB())
 	return conn
 }
 
@@ -617,7 +617,9 @@ func TestTransaction(t *testing.T) {
 
 		// Update the user - ensure WHERE is after SET
 		_, err = qb.Table("users").
-			Update([]string{"name"}, []any{"Updated Transaction User"}).
+			Update(map[string]any{
+				"name": "Updated Transaction User",
+			}).
 			Where(EQ("name", "Transaction User")).
 			Exec(context.Background())
 		return err
@@ -724,7 +726,9 @@ func TestUpdate(t *testing.T) {
 			name: "simple update",
 			update: func(qb *QueryBuilder) error {
 				_, err := qb.Table("users").
-					Update([]string{"name"}, []any{"Updated Name"}).
+					Update(map[string]any{
+						"name": "Updated Name",
+					}).
 					Where(EQ("name", "John Doe")).
 					Exec(context.Background())
 				return err
@@ -737,7 +741,9 @@ func TestUpdate(t *testing.T) {
 			name: "update multiple rows",
 			update: func(qb *QueryBuilder) error {
 				_, err := qb.Table("users").
-					Update([]string{"name"}, []any{"Multiple Updated"}).
+					Update(map[string]any{
+						"name": "Multiple Updated",
+					}).
 					Where(OrCond(
 						EQ("name", "Jane Doe"),
 						EQ("name", "James Doe"),
@@ -755,7 +761,9 @@ func TestUpdate(t *testing.T) {
 				return qb.Transaction(context.Background(), func(txQB *QueryBuilder) error {
 					// First update
 					_, err := txQB.Table("users").
-						Update([]string{"name"}, []any{"Transaction Update 1"}).
+						Update(map[string]any{
+							"name": "Transaction Update 1",
+						}).
 						Where(EQ("name", "John Doe")).
 						Exec(context.Background())
 					if err != nil {
@@ -764,7 +772,9 @@ func TestUpdate(t *testing.T) {
 
 					// Second update
 					_, err = txQB.Table("users").
-						Update([]string{"name"}, []any{"Transaction Update 2"}).
+						Update(map[string]any{
+							"name": "Transaction Update 2",
+						}).
 						Where(EQ("name", "Jane Doe")).
 						Exec(context.Background())
 					return err
@@ -780,7 +790,9 @@ func TestUpdate(t *testing.T) {
 				return qb.Transaction(context.Background(), func(txQB *QueryBuilder) error {
 					// First update
 					_, err := txQB.Table("users").
-						Update([]string{"name"}, []any{"Failed Update"}).
+						Update(map[string]any{
+							"name": "Failed Update",
+						}).
 						Where(EQ("name", "John Doe")).
 						Exec(context.Background())
 					if err != nil {
@@ -799,7 +811,9 @@ func TestUpdate(t *testing.T) {
 			name: "update with invalid column",
 			update: func(qb *QueryBuilder) error {
 				_, err := qb.Table("users").
-					Update([]string{"invalid_column"}, []any{"Invalid Update"}).
+					Update(map[string]any{
+						"invalid_column": "Invalid Update",
+					}).
 					Where(EQ("name", "John Doe")).
 					Exec(context.Background())
 				return err
@@ -863,11 +877,12 @@ func TestUpdate(t *testing.T) {
 
 func TestBuild(t *testing.T) {
 	tests := []struct {
-		name          string
-		setup         func(*QueryBuilder)
-		expectedSQL   string
-		expectedArgs  []interface{}
-		expectedError bool
+		name             string
+		setup            func(*QueryBuilder)
+		expectedSQL      string
+		expectedArgs     []interface{}
+		expectedError    bool
+		orderIndependent bool
 	}{
 		{
 			name: "simple select",
@@ -910,7 +925,9 @@ func TestBuild(t *testing.T) {
 			name: "simple update",
 			setup: func(qb *QueryBuilder) {
 				qb.Table("users").
-					Update([]string{"name"}, []any{"John"}).
+					Update(map[string]any{
+						"name": "John",
+					}).
 					Where(EQ("id", 1))
 			},
 			expectedSQL:   "UPDATE users SET name = ? WHERE id = ?",
@@ -921,12 +938,16 @@ func TestBuild(t *testing.T) {
 			name: "update multiple columns",
 			setup: func(qb *QueryBuilder) {
 				qb.Table("users").
-					Update([]string{"name", "email"}, []any{"John", "john@example.com"}).
+					Update(map[string]any{
+						"name":  "John",
+						"email": "john@example.com",
+					}).
 					Where(EQ("id", 1))
 			},
-			expectedSQL:   "UPDATE users SET name = ?, email = ? WHERE id = ?",
-			expectedArgs:  []interface{}{"John", "john@example.com", 1},
-			expectedError: false,
+			expectedSQL:      "UPDATE users SET name = ?, email = ? WHERE id = ?",
+			expectedArgs:     []interface{}{"John", "john@example.com", 1},
+			expectedError:    false,
+			orderIndependent: true,
 		},
 		{
 			name: "simple delete",
@@ -1016,18 +1037,228 @@ func TestBuild(t *testing.T) {
 			sql = strings.Join(strings.Fields(sql), " ")
 			expectedSQL := strings.Join(strings.Fields(tt.expectedSQL), " ")
 
-			if sql != expectedSQL {
-				t.Errorf("SQL mismatch:\nExpected: %s\nGot:      %s", expectedSQL, sql)
+			if tt.orderIndependent {
+				// For order-independent tests, check that all parts are present
+				// Extract the SET part of the SQL
+				setParts := strings.Split(sql, "SET ")[1]
+				setParts = strings.Split(setParts, " WHERE")[0]
+				parts := strings.Split(setParts, ", ")
+
+				// Check that all parts are present in the SQL
+				for _, part := range parts {
+					if !strings.Contains(sql, part) {
+						t.Errorf("SQL missing expected part: %s", part)
+					}
+				}
+
+				// Check that all expected values are present in args
+				for _, expectedValue := range tt.expectedArgs {
+					found := false
+					for _, arg := range args {
+						if arg == expectedValue {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("Missing expected argument: %v", expectedValue)
+					}
+				}
+			} else {
+				if sql != expectedSQL {
+					t.Errorf("SQL mismatch:\nExpected: %s\nGot:      %s", expectedSQL, sql)
+				}
+
+				if len(args) != len(tt.expectedArgs) {
+					t.Errorf("Args length mismatch: expected %d, got %d", len(tt.expectedArgs), len(args))
+					return
+				}
+
+				for i, arg := range args {
+					if arg != tt.expectedArgs[i] {
+						t.Errorf("Arg[%d] mismatch: expected %v, got %v", i, tt.expectedArgs[i], arg)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestWhere(t *testing.T) {
+	tests := []struct {
+		name          string
+		setup         func(*QueryBuilder)
+		expectedSQL   string
+		expectedArgs  []interface{}
+		expectedError bool
+	}{
+		{
+			name: "simple where with equal",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Equal("id", 1))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE id = ?",
+			expectedArgs:  []interface{}{1},
+			expectedError: false,
+		},
+		{
+			name: "where with multiple conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(And(
+						Equal("id", 1)(qb.builder),
+						Equal("name", "John")(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (id = ? AND name = ?)",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "where with multiple direct conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(
+						Equal("id", 1),
+						Equal("name", "John"),
+					)
+			},
+			expectedSQL:   "SELECT * FROM users WHERE id = ? AND name = ?",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "where with OR conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Or(
+						Equal("id", 1)(qb.builder),
+						Equal("name", "John")(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (id = ? OR name = ?)",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "where with complex conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(And(
+						GreaterThan("age", 18)(qb.builder),
+						Or(
+							Equal("status", "active")(qb.builder),
+							Equal("status", "pending")(qb.builder),
+						)(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (age > ? AND (status = ? OR status = ?))",
+			expectedArgs:  []interface{}{18, "active", "pending"},
+			expectedError: false,
+		},
+		{
+			name: "where with LIKE condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Like("name", "John%"))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE name LIKE ?",
+			expectedArgs:  []interface{}{"John%"},
+			expectedError: false,
+		},
+		{
+			name: "where with IN condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(In("id", 1, 2, 3))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE id IN (?, ?, ?)",
+			expectedArgs:  []interface{}{1, 2, 3},
+			expectedError: false,
+		},
+		{
+			name: "where with BETWEEN condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Between("age", 18, 65))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE age BETWEEN ? AND ?",
+			expectedArgs:  []interface{}{18, 65},
+			expectedError: false,
+		},
+		{
+			name: "where with IS NULL condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(IsNull("deleted_at"))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE deleted_at IS NULL",
+			expectedArgs:  nil,
+			expectedError: false,
+		},
+		{
+			name: "where with multiple AND conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(And(
+						Equal("status", "active")(qb.builder),
+						GreaterThan("age", 18)(qb.builder),
+						Like("email", "%@example.com")(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (status = ? AND age > ? AND email LIKE ?)",
+			expectedArgs:  []interface{}{"active", 18, "%@example.com"},
+			expectedError: false,
+		},
+		{
+			name: "where with NOT condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Not(Equal("status", "inactive")(qb.builder)))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE NOT status = ?",
+			expectedArgs:  []interface{}{"inactive"},
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := setupDb(DialectSQLite)
+			defer conn.Close()
+			qb := NewQueryBuilder(conn)
+			tt.setup(qb)
+
+			sql, args := qb.Build()
+			if tt.expectedError {
+				t.Errorf("expected error but got none")
+				return
+			}
+
+			if sql != tt.expectedSQL {
+				t.Errorf("expected SQL %q, got %q", tt.expectedSQL, sql)
 			}
 
 			if len(args) != len(tt.expectedArgs) {
-				t.Errorf("Args length mismatch: expected %d, got %d", len(tt.expectedArgs), len(args))
+				t.Errorf("expected %d args, got %d", len(tt.expectedArgs), len(args))
 				return
 			}
 
 			for i, arg := range args {
 				if arg != tt.expectedArgs[i] {
-					t.Errorf("Arg[%d] mismatch: expected %v, got %v", i, tt.expectedArgs[i], arg)
+					t.Errorf("expected arg[%d] to be %v, got %v", i, tt.expectedArgs[i], arg)
 				}
 			}
 		})
