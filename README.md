@@ -1,4 +1,4 @@
-# Go Database Package
+# Lemmego DB
 
 A flexible and powerful database package for Go that provides a fluent interface for building SQL queries. This package supports multiple database dialects including SQLite, MySQL, PostgreSQL, and MS SQL Server.
 
@@ -17,7 +17,7 @@ A flexible and powerful database package for Go that provides a fluent interface
 ## Installation
 
 ```bash
-go get github.com/yourusername/db
+go get github.com/lemmego/db
 ```
 
 ## Quick Start
@@ -25,7 +25,7 @@ go get github.com/yourusername/db
 ### 1. Configure Database Connection
 
 ```go
-import "github.com/yourusername/db"
+import "github.com/lemmego/db"
 
 // Create a new database configuration
 config := &db.Config{
