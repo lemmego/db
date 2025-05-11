@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"strings"
 
 	"github.com/huandu/go-sqlbuilder"
 	"github.com/jmoiron/sqlx"
@@ -256,29 +255,20 @@ func (qb *QueryBuilder) Build() (string, []any) {
 	case "DELETE":
 		return qb.builder.(*BuilderDelete).Build()
 	case "INSERT":
-		// Keep existing logic for INSERT
-		var sql strings.Builder
-		var args []any
-		sql.WriteString("INSERT INTO ")
+		if qb.builder == nil {
+			qb.builder = InsertBuilder(qb.conn.ConnName)
+		}
+		ib := qb.builder.(*BuilderInsert)
 		if qb.tableName != "" {
-			sql.WriteString(qb.tableName)
+			ib.InsertInto(qb.tableName)
 		}
 		if len(qb.insertColumns) > 0 {
-			sql.WriteString(" (")
-			sql.WriteString(strings.Join(qb.insertColumns, ", "))
-			sql.WriteString(") VALUES ")
-			valueClauses := make([]string, len(qb.insertValues))
-			for i, row := range qb.insertValues {
-				placeholders := make([]string, len(row))
-				for j := range row {
-					placeholders[j] = "?"
-					args = append(args, row[j])
-				}
-				valueClauses[i] = "(" + strings.Join(placeholders, ", ") + ")"
+			ib.Cols(qb.insertColumns...)
+			for _, row := range qb.insertValues {
+				ib.Values(row...)
 			}
-			sql.WriteString(strings.Join(valueClauses, ", "))
 		}
-		return sql.String(), args
+		return ib.Build()
 	default:
 		return qb.builder.Build()
 	}
