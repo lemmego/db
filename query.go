@@ -102,16 +102,8 @@ type BuilderDelete struct {
 }
 
 // NewQueryBuilder creates a new QueryBuilder instance.
-func NewQueryBuilder(conn *Connection, builder ...Builder) *QueryBuilder {
-	qb := &QueryBuilder{conn: conn}
-
-	if len(builder) > 0 {
-		qb.builder = builder[0]
-	} else {
-		qb.builder = SelectBuilder(conn.ConnName)
-	}
-
-	return qb
+func NewQueryBuilder(conn *Connection) *QueryBuilder {
+	return &QueryBuilder{conn: conn}
 }
 
 // SetBuilder sets the builder for the query builder.
@@ -145,30 +137,36 @@ func (qb *QueryBuilder) Join(table string, onExpr ...string) *QueryBuilder {
 	return qb
 }
 
-// Select specifies the columns to select
+// Select sets the columns to select
 func (qb *QueryBuilder) Select(columns ...string) *QueryBuilder {
 	qb.queryType = "SELECT"
+	qb.builder = SelectBuilder(qb.conn.ConnName)
 	qb.selectColumns = columns
 	return qb
 }
 
-// Insert specifies the columns and values to insert
+// Insert sets up an INSERT query
 func (qb *QueryBuilder) Insert(columns []string, values [][]any) *QueryBuilder {
 	qb.queryType = "INSERT"
+	qb.builder = InsertBuilder(qb.conn.ConnName)
 	qb.insertColumns = columns
 	qb.insertValues = values
 	return qb
 }
 
-// Update sets the columns and values for an UPDATE query
+// Update sets up an UPDATE query
 func (qb *QueryBuilder) Update(columns []string, values [][]any) *QueryBuilder {
 	qb.queryType = "UPDATE"
+	qb.builder = UpdateBuilder(qb.conn.ConnName)
 	qb.updateColumns = columns
 	qb.updateValues = values
-	qb.builder = UpdateBuilder(qb.conn.ConnName)
-	if qb.tableName != "" {
-		qb.builder.(*BuilderUpdate).Update(qb.tableName)
-	}
+	return qb
+}
+
+// Delete sets up a DELETE query
+func (qb *QueryBuilder) Delete() *QueryBuilder {
+	qb.queryType = "DELETE"
+	qb.builder = DeleteBuilder(qb.conn.ConnName)
 	return qb
 }
 
@@ -224,6 +222,7 @@ func (qb *QueryBuilder) AsDelete() *BuilderDelete {
 
 // Build builds the SQL query and returns the SQL string and arguments
 func (qb *QueryBuilder) Build() (string, []any) {
+	// Initialize builder if not set
 	if qb.builder == nil {
 		switch qb.queryType {
 		case "SELECT":
@@ -232,18 +231,29 @@ func (qb *QueryBuilder) Build() (string, []any) {
 			qb.builder = UpdateBuilder(qb.conn.ConnName)
 		case "DELETE":
 			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		case "INSERT":
+			qb.builder = InsertBuilder(qb.conn.ConnName)
 		default:
+			// Default to SELECT if no query type specified
+			qb.queryType = "SELECT"
 			qb.builder = SelectBuilder(qb.conn.ConnName)
 		}
 	}
 
+	// Validate builder type matches query type
 	switch qb.queryType {
 	case "SELECT":
+		if _, ok := qb.builder.(*BuilderSelect); !ok {
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
 		if len(qb.selectColumns) > 0 {
 			qb.builder.(*BuilderSelect).Select(qb.selectColumns...)
 		}
 		return qb.builder.(*BuilderSelect).Build()
 	case "UPDATE":
+		if _, ok := qb.builder.(*BuilderUpdate); !ok {
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		}
 		if len(qb.updateColumns) > 0 && len(qb.updateValues) > 0 {
 			assignments := make([]string, len(qb.updateColumns))
 			for i, col := range qb.updateColumns {
@@ -253,9 +263,12 @@ func (qb *QueryBuilder) Build() (string, []any) {
 		}
 		return qb.builder.(*BuilderUpdate).Build()
 	case "DELETE":
+		if _, ok := qb.builder.(*BuilderDelete); !ok {
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		}
 		return qb.builder.(*BuilderDelete).Build()
 	case "INSERT":
-		if qb.builder == nil {
+		if _, ok := qb.builder.(*BuilderInsert); !ok {
 			qb.builder = InsertBuilder(qb.conn.ConnName)
 		}
 		ib := qb.builder.(*BuilderInsert)
@@ -270,7 +283,8 @@ func (qb *QueryBuilder) Build() (string, []any) {
 		}
 		return ib.Build()
 	default:
-		return qb.builder.Build()
+		// This should never happen due to the initialization above
+		return "", nil
 	}
 }
 
@@ -593,14 +607,4 @@ func (qb *QueryBuilder) Transaction(ctx context.Context, fn func(*QueryBuilder) 
 
 	txErr = fn(txQB)
 	return txErr
-}
-
-// Delete starts a DELETE query
-func (qb *QueryBuilder) Delete() *QueryBuilder {
-	qb.queryType = "DELETE"
-	qb.builder = DeleteBuilder(qb.conn.ConnName)
-	if qb.tableName != "" {
-		qb.builder.(*BuilderDelete).DeleteFrom(qb.tableName)
-	}
-	return qb
 }

@@ -165,5 +165,5 @@ func (qb *QueryBuilder) Conn(connName ...string) *QueryBuilder {
 // Query creates a new QueryBuilder instance with the specified connection
 func Query(connName ...string) *QueryBuilder {
 	conn := Get(connName...)
-	return NewQueryBuilder(conn, SelectBuilder(conn.ConnName))
+	return NewQueryBuilder(conn)
 }
