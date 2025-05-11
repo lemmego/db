@@ -70,9 +70,6 @@ type QueryBuilder struct {
 	updateValues  [][]any
 	insertColumns []string
 	insertValues  [][]any
-	orderBy       []string
-	limit         int
-	offset        int
 }
 
 // BuilderStruct provides common methods for building SQL queries using a struct.
