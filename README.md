@@ -97,14 +97,19 @@ _, err = db.Query().
 // Simple update
 _, err := db.Query().
     Table("users").
-    Update([]string{"name"}, []any{"Updated Name"}).
+    Update(map[string]any{
+        "name": "Updated Name",
+    }).
     Where(db.EQ("id", 1)).
     Exec(context.Background())
 
 // Update multiple columns
 _, err = db.Query().
     Table("users").
-    Update([]string{"name", "email"}, []any{"John", "john@example.com"}).
+    Update(map[string]any{
+        "name": "John",
+        "email": "john@example.com",
+    }).
     Where(db.EQ("id", 1)).
     Exec(context.Background())
 ```

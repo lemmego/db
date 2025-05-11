@@ -48,11 +48,6 @@ func (c *Config) DSN() string {
 	return dsn
 }
 
-// DSNWithError returns the Data Source Name (DSN) for the database connection and any error
-func (c *Config) DSNWithError() (string, error) {
-	return c.DataSource().String()
-}
-
 // DatabaseManager holds connections to various database instances
 type DatabaseManager struct {
 	mutex       sync.RWMutex
