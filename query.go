@@ -476,6 +476,18 @@ func (qb *QueryBuilder) Cursor(cursor string, direction string, cursorField stri
 		qb.Where(func(b Builder) string {
 			return b.(Cond).LessThan(cursorField, cursor)
 		})
+	default:
+		// Default to next if direction is invalid
+		qb.Where(func(b Builder) string {
+			return b.(Cond).GreaterThan(cursorField, cursor)
+		})
+	}
+
+	// Ensure we have proper ordering
+	if direction == "prev" {
+		qb.OrderBy(cursorField + " DESC")
+	} else {
+		qb.OrderBy(cursorField)
 	}
 
 	return qb.Limit(1)

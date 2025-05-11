@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -433,4 +434,168 @@ func TestPage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Helper function to check if a string contains a value, ignoring whitespace
+func containsNormalized(query string, value string) bool {
+	q := strings.ReplaceAll(query, " ", "")
+	q = strings.ReplaceAll(q, "\n", "")
+	v := strings.ReplaceAll(value, " ", "")
+	v = strings.ReplaceAll(v, "\n", "")
+	return strings.Contains(q, v)
+}
+
+func TestCursor(t *testing.T) {
+	setupDb(DialectSQLite)
+
+	// Insert test data with known IDs for predictable cursor behavior
+	_, err := Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
+		{1, "John Doe", time.Now()},
+		{2, "Jane Doe", time.Now()},
+		{3, "James Doe", time.Now()},
+		{4, "Alice Smith", time.Now()},
+		{5, "Bob Smith", time.Now()},
+	}).Exec(context.Background())
+
+	if err != nil {
+		t.Fatalf("Failed to insert test data: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		cursor        string
+		direction     string
+		cursorField   string
+		expectedIDs   []uint64
+		expectedCond  string
+		expectedOrder string
+	}{
+		{
+			name:          "empty cursor returns first item",
+			cursor:        "",
+			direction:     "next",
+			cursorField:   "id",
+			expectedIDs:   []uint64{1},
+			expectedCond:  "",
+			expectedOrder: "id",
+		},
+		{
+			name:          "next direction from id 2",
+			cursor:        "2",
+			direction:     "next",
+			cursorField:   "id",
+			expectedIDs:   []uint64{3},
+			expectedCond:  "id > ?",
+			expectedOrder: "id",
+		},
+		{
+			name:          "prev direction from id 4",
+			cursor:        "4",
+			direction:     "prev",
+			cursorField:   "id",
+			expectedIDs:   []uint64{3},
+			expectedCond:  "id < ?",
+			expectedOrder: "id DESC",
+		},
+		{
+			name:          "next direction with last item",
+			cursor:        "5",
+			direction:     "next",
+			cursorField:   "id",
+			expectedIDs:   []uint64{},
+			expectedCond:  "id > ?",
+			expectedOrder: "id",
+		},
+		{
+			name:          "prev direction with first item",
+			cursor:        "1",
+			direction:     "prev",
+			cursorField:   "id",
+			expectedIDs:   []uint64{},
+			expectedCond:  "id < ?",
+			expectedOrder: "id DESC",
+		},
+		{
+			name:          "invalid direction defaults to next",
+			cursor:        "2",
+			direction:     "invalid",
+			cursorField:   "id",
+			expectedIDs:   []uint64{3},
+			expectedCond:  "id > ?",
+			expectedOrder: "id",
+		},
+		{
+			name:          "cursor on non-existent id",
+			cursor:        "999",
+			direction:     "next",
+			cursorField:   "id",
+			expectedIDs:   []uint64{},
+			expectedCond:  "id > ?",
+			expectedOrder: "id",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var users []User
+			err := Query().
+				Table("users").
+				Select("*").
+				Cursor(tt.cursor, tt.direction, tt.cursorField).
+				ScanAll(context.Background(), &users)
+
+			if err != nil {
+				t.Errorf("Failed to execute query: %v", err)
+			}
+
+			// Check number of results
+			if len(users) != len(tt.expectedIDs) {
+				t.Errorf("Expected %d users, got %d", len(tt.expectedIDs), len(users))
+				return
+			}
+
+			// Check IDs of returned users
+			for i, user := range users {
+				if user.ID != tt.expectedIDs[i] {
+					t.Errorf("Expected user ID %d, got %d", tt.expectedIDs[i], user.ID)
+				}
+			}
+
+			// For non-empty cursor, verify the condition and order in the query
+			if tt.cursor != "" {
+				query, args := Query().
+					Table("users").
+					Select("*").
+					Cursor(tt.cursor, tt.direction, tt.cursorField).
+					Build()
+
+				if !containsNormalized(query, tt.expectedCond) {
+					t.Errorf("Expected condition '%s' not found in query: %s", tt.expectedCond, query)
+				}
+
+				if !containsNormalized(query, tt.expectedOrder) {
+					t.Errorf("Expected order '%s' not found in query: %s", tt.expectedOrder, query)
+				}
+
+				if !contains(args, tt.cursor) {
+					t.Errorf("Expected cursor value '%s' not found in args: %v", tt.cursor, args)
+				}
+			}
+		})
+	}
+}
+
+// Helper function to check if a slice contains a value
+func contains(slice interface{}, value interface{}) bool {
+	switch v := slice.(type) {
+	case []interface{}:
+		for _, item := range v {
+			if item == value {
+				return true
+			}
+		}
+	case string:
+		return v == value.(string)
+	}
+	return false
 }
