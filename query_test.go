@@ -1118,6 +1118,20 @@ func TestWhere(t *testing.T) {
 			expectedError: false,
 		},
 		{
+			name: "where with multiple direct conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(
+						Equal("id", 1),
+						Equal("name", "John"),
+					)
+			},
+			expectedSQL:   "SELECT * FROM users WHERE id = ? AND name = ?",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
 			name: "where with OR conditions",
 			setup: func(qb *QueryBuilder) {
 				qb.Table("users").
