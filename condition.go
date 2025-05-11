@@ -513,3 +513,14 @@ func Var(value interface{}) ConditionFunc {
 		return ""
 	}
 }
+
+// OrCond combines multiple ConditionFuncs with OR logic.
+func OrCond(conds ...ConditionFunc) ConditionFunc {
+	return func(b Builder) string {
+		parts := make([]string, len(conds))
+		for i, cond := range conds {
+			parts[i] = cond(b)
+		}
+		return b.(Cond).Or(parts...)
+	}
+}

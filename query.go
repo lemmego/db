@@ -3,9 +3,10 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
+	"strings"
 
 	"github.com/huandu/go-sqlbuilder"
+	"github.com/jmoiron/sqlx"
 	"github.com/k0kubun/pp/v3"
 )
 
@@ -57,12 +58,21 @@ type Builder interface {
 	sqlbuilder.Builder
 }
 
-// QueryBuilder provides many convenient query building functionalities.
+// QueryBuilder is a builder for SQL queries
 type QueryBuilder struct {
-	conn      *Connection
-	builder   Builder
-	tableName string
-	debug     bool
+	conn          *Connection
+	builder       Builder
+	tableName     string
+	debug         bool
+	queryType     string
+	selectColumns []string
+	updateColumns []string
+	updateValues  [][]any
+	insertColumns []string
+	insertValues  [][]any
+	orderBy       []string
+	limit         int
+	offset        int
 }
 
 // BuilderStruct provides common methods for building SQL queries using a struct.
@@ -122,6 +132,14 @@ func (qb *QueryBuilder) GetBuilder() Builder {
 // Table sets the table name for the query builder.
 func (qb *QueryBuilder) Table(name string) *QueryBuilder {
 	qb.tableName = name
+	switch b := qb.builder.(type) {
+	case *BuilderSelect:
+		b.From(name)
+	case *BuilderUpdate:
+		b.Update(name)
+	case *BuilderDelete:
+		b.DeleteFrom(name)
+	}
 	return qb
 }
 
@@ -131,45 +149,30 @@ func (qb *QueryBuilder) Join(table string, onExpr ...string) *QueryBuilder {
 	return qb
 }
 
-// Select sets the SELECT clause for the query builder.
-func (qb *QueryBuilder) Select(col ...string) *QueryBuilder {
-	sb := SelectBuilder(qb.conn.ConnName)
-	sb.Select(col...).From(qb.tableName)
-	qb.SetBuilder(sb)
+// Select specifies the columns to select
+func (qb *QueryBuilder) Select(columns ...string) *QueryBuilder {
+	qb.queryType = "SELECT"
+	qb.selectColumns = columns
 	return qb
 }
 
-// Insert sets the INSERT clause for the query builder.
-func (qb *QueryBuilder) Insert(cols []string, values [][]any) *QueryBuilder {
-	if len(values) == 0 {
-		panic("db: values are required for Insert operation")
-	}
-
-	if qb.tableName == "" {
-		panic("db: table name is required for Insert operation")
-	}
-
-	ib := InsertBuilder(qb.conn.ConnName)
-	ib.InsertInto(qb.tableName).Cols(cols...)
-	for _, value := range values {
-		ib.Values(value...)
-	}
-	qb.SetBuilder(ib)
+// Insert specifies the columns and values to insert
+func (qb *QueryBuilder) Insert(columns []string, values [][]any) *QueryBuilder {
+	qb.queryType = "INSERT"
+	qb.insertColumns = columns
+	qb.insertValues = values
 	return qb
 }
 
-// Update sets the UPDATE clause for the query builder.
-func (qb *QueryBuilder) Update(cols []string, values [][]any) *QueryBuilder {
-	ub := UpdateBuilder(qb.conn.ConnName)
-	ub.Update(qb.tableName)
-	if len(values) > 0 {
-		assignments := make([]string, len(cols))
-		for i, col := range cols {
-			assignments[i] = ub.Assign(col, values[0][i])
-		}
-		ub.Set(assignments...)
+// Update sets the columns and values for an UPDATE query
+func (qb *QueryBuilder) Update(columns []string, values [][]any) *QueryBuilder {
+	qb.queryType = "UPDATE"
+	qb.updateColumns = columns
+	qb.updateValues = values
+	qb.builder = UpdateBuilder(qb.conn.ConnName)
+	if qb.tableName != "" {
+		qb.builder.(*BuilderUpdate).Update(qb.tableName)
 	}
-	qb.SetBuilder(ub)
 	return qb
 }
 
@@ -223,28 +226,90 @@ func (qb *QueryBuilder) AsDelete() *BuilderDelete {
 	return qb.builder.(*BuilderDelete)
 }
 
-// Build builds the SQL statement and its arguments.
-func (qb *QueryBuilder) Build() (string, []interface{}) {
-	sqlStmt, args := qb.builder.Build()
-	if qb.debug {
-		pp.Println(sqlStmt, args)
-	}
-	return sqlStmt, args
-}
-
-// Where adds a WHERE clause to the query builder.
-func (qb *QueryBuilder) Where(condFuncs ...ConditionFunc) *QueryBuilder {
-	for _, condFunc := range condFuncs {
-		switch builder := qb.builder.(type) {
-		case *BuilderSelect:
-			builder.Where(condFunc(qb.builder))
-		case *BuilderUpdate:
-			builder.Where(condFunc(qb.builder))
-		case *BuilderDelete:
-			builder.Where(condFunc(qb.builder))
+// Build builds the SQL query and returns the SQL string and arguments
+func (qb *QueryBuilder) Build() (string, []any) {
+	if qb.builder == nil {
+		switch qb.queryType {
+		case "SELECT":
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		case "UPDATE":
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		case "DELETE":
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		default:
+			qb.builder = SelectBuilder(qb.conn.ConnName)
 		}
 	}
 
+	switch qb.queryType {
+	case "SELECT":
+		if len(qb.selectColumns) > 0 {
+			qb.builder.(*BuilderSelect).Select(qb.selectColumns...)
+		}
+		return qb.builder.(*BuilderSelect).Build()
+	case "UPDATE":
+		if len(qb.updateColumns) > 0 && len(qb.updateValues) > 0 {
+			assignments := make([]string, len(qb.updateColumns))
+			for i, col := range qb.updateColumns {
+				assignments[i] = qb.builder.(*BuilderUpdate).Assign(col, qb.updateValues[0][i])
+			}
+			qb.builder.(*BuilderUpdate).Set(assignments...)
+		}
+		return qb.builder.(*BuilderUpdate).Build()
+	case "DELETE":
+		return qb.builder.(*BuilderDelete).Build()
+	case "INSERT":
+		// Keep existing logic for INSERT
+		var sql strings.Builder
+		var args []any
+		sql.WriteString("INSERT INTO ")
+		if qb.tableName != "" {
+			sql.WriteString(qb.tableName)
+		}
+		if len(qb.insertColumns) > 0 {
+			sql.WriteString(" (")
+			sql.WriteString(strings.Join(qb.insertColumns, ", "))
+			sql.WriteString(") VALUES ")
+			valueClauses := make([]string, len(qb.insertValues))
+			for i, row := range qb.insertValues {
+				placeholders := make([]string, len(row))
+				for j := range row {
+					placeholders[j] = "?"
+					args = append(args, row[j])
+				}
+				valueClauses[i] = "(" + strings.Join(placeholders, ", ") + ")"
+			}
+			sql.WriteString(strings.Join(valueClauses, ", "))
+		}
+		return sql.String(), args
+	default:
+		return qb.builder.Build()
+	}
+}
+
+// Where adds a WHERE clause to the query
+func (qb *QueryBuilder) Where(condition ConditionFunc) *QueryBuilder {
+	if qb.builder == nil {
+		switch qb.queryType {
+		case "SELECT":
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		case "UPDATE":
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		case "DELETE":
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		default:
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
+	}
+	// Call the builder's Where method
+	switch b := qb.builder.(type) {
+	case *BuilderSelect:
+		b.Where(condition(qb.builder))
+	case *BuilderUpdate:
+		b.Where(condition(qb.builder))
+	case *BuilderDelete:
+		b.Where(condition(qb.builder))
+	}
 	return qb
 }
 
@@ -308,63 +373,21 @@ func (qb *QueryBuilder) Having(condFuncs ...ConditionFunc) *QueryBuilder {
 	return qb
 }
 
-// Fetch executes the query and returns the results as a slice of maps.
-func (qb *QueryBuilder) Fetch(ctx context.Context) ([]map[string]interface{}, error) {
-	sqlStmt, args := qb.builder.Build()
+// Fetch executes the query and returns the rows
+func (qb *QueryBuilder) Fetch(ctx context.Context) (*sqlx.Rows, error) {
+	if qb.builder == nil {
+		qb.builder = SelectBuilder(qb.conn.ConnName)
+	}
+
+	sqlStmt, args := qb.Build()
 	if qb.debug {
 		pp.Println(sqlStmt, args)
 	}
 
-	var rows *sql.Rows
-	var err error
-
-	// If we're in a transaction, use the transaction context
 	if qb.conn.InTransaction() {
-		rows, err = qb.conn.tx.QueryContext(ctx, sqlStmt, args...)
-	} else {
-		rows, err = qb.conn.QueryContext(ctx, sqlStmt, args...)
+		return qb.conn.tx.QueryxContext(ctx, sqlStmt, args...)
 	}
-
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a slice of interface{} pointers to hold the values
-	values := make([]interface{}, len(columns))
-	for i := range values {
-		var v interface{}
-		values[i] = &v
-	}
-
-	var results []map[string]interface{}
-
-	for rows.Next() {
-		err := rows.Scan(values...)
-		if err != nil {
-			return nil, err
-		}
-
-		rowData := make(map[string]interface{})
-		for i, col := range columns {
-			// Dereference the interface{} pointer to get the value
-			valPtr := values[i].(*interface{})
-			rowData[col] = *valPtr
-		}
-
-		results = append(results, rowData)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
+	return qb.conn.DB.QueryxContext(ctx, sqlStmt, args...)
 }
 
 // Debug enables or disables debug mode for the query builder.
@@ -373,57 +396,64 @@ func (qb *QueryBuilder) Debug(log bool) *QueryBuilder {
 	return qb
 }
 
-// Scan executes the query and scans the results into the provided destination.
+// Scan executes the query and scans the result into dest
 func (qb *QueryBuilder) Scan(ctx context.Context, dest interface{}) error {
-	if qb.tableName == "" {
-		return errors.New("missing table name")
+	if qb.builder == nil {
+		qb.builder = SelectBuilder(qb.conn.ConnName)
 	}
 
-	query, args := qb.builder.Build()
+	query, args := qb.Build()
 	if qb.debug {
 		pp.Println(query, args)
 	}
 
-	// If we're in a transaction, use the transaction context
 	if qb.conn.InTransaction() {
 		return qb.conn.tx.GetContext(ctx, dest, query, args...)
 	}
-
-	return qb.conn.GetContext(ctx, dest, query, args...)
+	return qb.conn.DB.GetContext(ctx, dest, query, args...)
 }
 
-// ScanAll executes the query and scans the results into the provided destination.
+// ScanAll executes the query and scans all results into dest
 func (qb *QueryBuilder) ScanAll(ctx context.Context, dest interface{}) error {
-	if qb.tableName == "" {
-		return errors.New("missing table name")
+	if qb.builder == nil {
+		qb.builder = SelectBuilder(qb.conn.ConnName)
 	}
 
-	query, args := qb.builder.Build()
+	query, args := qb.Build()
 	if qb.debug {
 		pp.Println(query, args)
 	}
 
-	// If we're in a transaction, use the transaction context
 	if qb.conn.InTransaction() {
 		return qb.conn.tx.SelectContext(ctx, dest, query, args...)
 	}
-
-	return qb.conn.SelectContext(ctx, dest, query, args...)
+	return qb.conn.DB.SelectContext(ctx, dest, query, args...)
 }
 
-// Exec executes the query and returns the result.
+// Exec executes the query and returns the result
 func (qb *QueryBuilder) Exec(ctx context.Context) (sql.Result, error) {
-	query, args := qb.builder.Build()
+	if qb.builder == nil {
+		switch qb.queryType {
+		case "SELECT":
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		case "UPDATE":
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		case "DELETE":
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		default:
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
+	}
+
+	query, args := qb.Build()
 	if qb.debug {
 		pp.Println(query, args)
 	}
 
-	// If we're in a transaction, use the transaction context
 	if qb.conn.InTransaction() {
 		return qb.conn.tx.ExecContext(ctx, query, args...)
 	}
-
-	return qb.conn.ExecContext(ctx, query, args...)
+	return qb.conn.DB.ExecContext(ctx, query, args...)
 }
 
 // getBuilderForDialect returns the appropriate builder flavor based on dialect
@@ -576,4 +606,11 @@ func (qb *QueryBuilder) Transaction(ctx context.Context, fn func(*QueryBuilder) 
 
 	txErr = fn(txQB)
 	return txErr
+}
+
+// Delete starts a DELETE query
+func (qb *QueryBuilder) Delete() *QueryBuilder {
+	qb.queryType = "DELETE"
+	qb.builder = DeleteBuilder(qb.conn.ConnName)
+	return qb
 }

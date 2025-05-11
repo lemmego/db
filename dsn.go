@@ -96,8 +96,11 @@ func (d *DataSource) validateParams(params string) error {
 	return errors.New("invalid params format")
 }
 
-// Example: file::memory:?cache=shared
+// Example: file:memdb1?mode=memory&cache=shared
 func (d *DataSource) getSqliteDSN() string {
+	if d.Name == "" {
+		return "file::memory:?" + d.Params
+	}
 	return "file:" + d.Name + "?" + d.Params
 }
 

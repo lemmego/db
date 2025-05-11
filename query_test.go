@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -43,6 +44,12 @@ type Comment struct {
 // =======================TestModels=========================
 
 func setupDb(dialect string) *Connection {
+	// Close any existing connections
+	if conn, exists := DM().Get("default"); exists {
+		conn.Close()
+		DM().Remove("default")
+	}
+
 	var config *Config
 
 	switch dialect {
@@ -50,8 +57,8 @@ func setupDb(dialect string) *Connection {
 		config = &Config{
 			ConnName: "default",
 			Driver:   DialectSQLite,
-			Database: ":memory:",
-			Params:   "cache=shared",
+			Database: "memdb1", // Use a named in-memory database
+			Params:   "mode=memory&cache=shared",
 		}
 	case DialectMySQL:
 		{
@@ -84,7 +91,12 @@ func setupDb(dialect string) *Connection {
 }
 
 func createUsersTable(db *sql.DB) error {
-	db.Exec(`DELETE from users`)
+	// Drop the table if it exists to ensure a clean state
+	_, err := db.Exec(`DROP TABLE IF EXISTS users`)
+	if err != nil {
+		return fmt.Errorf("failed to drop users table: %v", err)
+	}
+
 	ctb := CreateTableBuilder().CreateTable("users").IfNotExists()
 	ctb.Define("id", "INTEGER", "PRIMARY KEY")
 	ctb.Define("name", "VARCHAR(255)", "NOT NULL")
@@ -92,10 +104,9 @@ func createUsersTable(db *sql.DB) error {
 
 	q, _ := ctb.Build()
 
-	_, err := db.Exec(q)
-
+	_, err = db.Exec(q)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create users table: %v", err)
 	}
 
 	return nil
@@ -238,7 +249,7 @@ func TestCreateTable(t *testing.T) {
 	}
 }
 
-func TestSelect(t *testing.T) {
+func TestSelectBuilder(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
 		{1, "John Doe", 1234567890},
@@ -255,7 +266,7 @@ func TestSelect(t *testing.T) {
 	defer rows.Close()
 }
 
-func TestUpdate(t *testing.T) {
+func TestUpdateBuilder(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
 		{1, "John Doe", 1234567890},
@@ -299,7 +310,7 @@ func TestUpdate(t *testing.T) {
 	pp.Print(users)
 }
 
-func TestDelete(t *testing.T) {
+func TestDeleteBuilder(t *testing.T) {
 	db := setupDb(DialectSQLite)
 	Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
 		{1, "John Doe", 1234567890},
@@ -710,5 +721,154 @@ func TestTransaction(t *testing.T) {
 	}
 	if len(panicUsers) > 0 {
 		t.Error("Expected user to not exist due to panic rollback")
+	}
+}
+
+func TestUpdate(t *testing.T) {
+	tests := []struct {
+		name          string
+		update        func(*QueryBuilder) error
+		expectedName  string
+		expectedCount int
+		shouldFail    bool
+	}{
+		{
+			name: "simple update",
+			update: func(qb *QueryBuilder) error {
+				_, err := qb.Table("users").
+					Update([]string{"name"}, [][]any{{"Updated Name"}}).
+					Where(EQ("name", "John Doe")).
+					Exec(context.Background())
+				return err
+			},
+			expectedName:  "Updated Name",
+			expectedCount: 1,
+			shouldFail:    false,
+		},
+		{
+			name: "update multiple rows",
+			update: func(qb *QueryBuilder) error {
+				_, err := qb.Table("users").
+					Update([]string{"name"}, [][]any{{"Multiple Updated"}}).
+					Where(OrCond(
+						EQ("name", "Jane Doe"),
+						EQ("name", "James Doe"),
+					)).
+					Exec(context.Background())
+				return err
+			},
+			expectedName:  "Multiple Updated",
+			expectedCount: 2,
+			shouldFail:    false,
+		},
+		{
+			name: "update in transaction",
+			update: func(qb *QueryBuilder) error {
+				return qb.Transaction(context.Background(), func(txQB *QueryBuilder) error {
+					// First update
+					_, err := txQB.Table("users").
+						Update([]string{"name"}, [][]any{{"Transaction Update 1"}}).
+						Where(EQ("name", "John Doe")).
+						Exec(context.Background())
+					if err != nil {
+						return err
+					}
+
+					// Second update
+					_, err = txQB.Table("users").
+						Update([]string{"name"}, [][]any{{"Transaction Update 2"}}).
+						Where(EQ("name", "Jane Doe")).
+						Exec(context.Background())
+					return err
+				})
+			},
+			expectedName:  "Transaction Update 1",
+			expectedCount: 1,
+			shouldFail:    false,
+		},
+		{
+			name: "failed transaction",
+			update: func(qb *QueryBuilder) error {
+				return qb.Transaction(context.Background(), func(txQB *QueryBuilder) error {
+					// First update
+					_, err := txQB.Table("users").
+						Update([]string{"name"}, [][]any{{"Failed Update"}}).
+						Where(EQ("name", "John Doe")).
+						Exec(context.Background())
+					if err != nil {
+						return err
+					}
+
+					// Return error to trigger rollback
+					return errors.New("intentional error")
+				})
+			},
+			expectedName:  "John Doe", // Should remain unchanged due to rollback
+			expectedCount: 1,
+			shouldFail:    true,
+		},
+		{
+			name: "update with invalid column",
+			update: func(qb *QueryBuilder) error {
+				_, err := qb.Table("users").
+					Update([]string{"invalid_column"}, [][]any{{"Invalid Update"}}).
+					Where(EQ("name", "John Doe")).
+					Exec(context.Background())
+				return err
+			},
+			expectedName:  "John Doe", // Should remain unchanged
+			expectedCount: 1,
+			shouldFail:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := setupDb(DialectSQLite)
+			defer conn.Close()
+
+			// Clear the table and insert fresh test data
+			_, err := conn.Table("users").Delete().Exec(context.Background())
+			if err != nil {
+				t.Fatalf("Failed to clear table: %v", err)
+			}
+
+			// Insert fresh test data without specifying id
+			_, err = conn.Table("users").Insert([]string{"name", "created_at"}, [][]any{
+				{"John Doe", time.Now()},
+				{"Jane Doe", time.Now()},
+				{"James Doe", time.Now()},
+			}).Exec(context.Background())
+			if err != nil {
+				t.Fatalf("Failed to insert test data: %v", err)
+			}
+
+			// Execute the update
+			err = tt.update(conn.Table("users"))
+			if tt.shouldFail {
+				if err == nil {
+					t.Error("Expected update to fail, but it succeeded")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Update failed: %v", err)
+				}
+			}
+
+			// Verify the results
+			var users []User
+			err = conn.Table("users").
+				Select("*").
+				Where(EQ("name", tt.expectedName)).
+				ScanAll(context.Background(), &users)
+
+			if err != nil {
+				t.Errorf("Failed to verify results: %v", err)
+			}
+
+			if len(users) != tt.expectedCount {
+				t.Errorf("Expected %d users with name '%s', got %d", tt.expectedCount, tt.expectedName, len(users))
+			}
+		})
 	}
 }
