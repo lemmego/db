@@ -141,21 +141,6 @@ func Get(name ...string) *Connection {
 	return conn
 }
 
-// GetWithError retrieves a database connection with error handling
-func GetWithError(name ...string) (*Connection, error) {
-	connName := "default"
-	if len(name) > 0 {
-		connName = name[0]
-	}
-
-	conn, found := instance.Get(connName)
-	if !found {
-		return nil, fmt.Errorf("%w: %s", ErrConnectionNotFound, connName)
-	}
-
-	return conn, nil
-}
-
 // Conn sets the given connection for the QueryBuilder
 func (qb *QueryBuilder) Conn(connName ...string) *QueryBuilder {
 	qb.conn = Get(connName...)
@@ -165,5 +150,10 @@ func (qb *QueryBuilder) Conn(connName ...string) *QueryBuilder {
 // Query creates a new QueryBuilder instance with the specified connection
 func Query(connName ...string) *QueryBuilder {
 	conn := Get(connName...)
+	return NewQueryBuilder(conn)
+}
+
+// QueryFromConn creates a new QueryBuilder instance from an existing connection
+func QueryFromConn(conn *Connection) *QueryBuilder {
 	return NewQueryBuilder(conn)
 }

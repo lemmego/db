@@ -458,10 +458,10 @@ func containsNormalized(query string, value string) bool {
 }
 
 func TestCursor(t *testing.T) {
-	setupDb(DialectSQLite)
+	conn := setupDb(DialectSQLite)
 
 	// Insert test data with known IDs for predictable cursor behavior
-	_, err := Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
+	_, err := QueryFromConn(conn).Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
 		{1, "John Doe", time.Now()},
 		{2, "Jane Doe", time.Now()},
 		{3, "James Doe", time.Now()},
@@ -550,8 +550,7 @@ func TestCursor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var users []User
-			err := Query().
-				Table("users").
+			err := QueryFromConn(conn).Table("users").
 				Select("*").
 				Cursor(tt.cursor, tt.direction, tt.cursorField).
 				ScanAll(context.Background(), &users)
@@ -575,8 +574,7 @@ func TestCursor(t *testing.T) {
 
 			// For non-empty cursor, verify the condition and order in the query
 			if tt.cursor != "" {
-				query, args := Query().
-					Table("users").
+				query, args := QueryFromConn(conn).Table("users").
 					Select("*").
 					Cursor(tt.cursor, tt.direction, tt.cursorField).
 					Build()
@@ -828,13 +826,13 @@ func TestUpdate(t *testing.T) {
 			defer conn.Close()
 
 			// Clear the table and insert fresh test data
-			_, err := conn.Table("users").Delete().Exec(context.Background())
+			_, err := QueryFromConn(conn).Table("users").Delete().Exec(context.Background())
 			if err != nil {
 				t.Fatalf("Failed to clear table: %v", err)
 			}
 
 			// Insert fresh test data without specifying id
-			_, err = conn.Table("users").Insert([]string{"name", "created_at"}, [][]any{
+			_, err = QueryFromConn(conn).Table("users").Insert([]string{"name", "created_at"}, [][]any{
 				{"John Doe", time.Now()},
 				{"Jane Doe", time.Now()},
 				{"James Doe", time.Now()},
@@ -844,7 +842,7 @@ func TestUpdate(t *testing.T) {
 			}
 
 			// Execute the update
-			err = tt.update(conn.Table("users"))
+			err = tt.update(QueryFromConn(conn).Table("users"))
 			if tt.shouldFail {
 				if err == nil {
 					t.Error("Expected update to fail, but it succeeded")
@@ -857,7 +855,7 @@ func TestUpdate(t *testing.T) {
 
 			// Verify the results
 			var users []User
-			err = conn.Table("users").
+			err = QueryFromConn(conn).Table("users").
 				Select("*").
 				Where(EQ("name", tt.expectedName)).
 				ScanAll(context.Background(), &users)
@@ -1019,7 +1017,7 @@ func TestBuild(t *testing.T) {
 			conn := setupDb(DialectSQLite)
 			defer conn.Close()
 
-			qb := conn.Table("users")
+			qb := QueryFromConn(conn).Table("users")
 			tt.setup(qb)
 
 			sql, args := qb.Build()

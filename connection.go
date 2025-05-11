@@ -57,11 +57,6 @@ func (c *Connection) Close() error {
 	return nil
 }
 
-// Table creates a new query builder for the specified table
-func (c *Connection) Table(name string) *QueryBuilder {
-	return NewQueryBuilder(c).Table(name)
-}
-
 // BeginTx starts a new transaction
 func (c *Connection) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
 	if c.tx != nil {

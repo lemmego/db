@@ -246,27 +246,39 @@ func (qb *QueryBuilder) Build() (string, []any) {
 		if _, ok := qb.builder.(*BuilderSelect); !ok {
 			qb.builder = SelectBuilder(qb.conn.ConnName)
 		}
-		if len(qb.selectColumns) > 0 {
-			qb.builder.(*BuilderSelect).Select(qb.selectColumns...)
+		sb := qb.builder.(*BuilderSelect)
+		if qb.tableName != "" {
+			sb.From(qb.tableName)
 		}
-		return qb.builder.(*BuilderSelect).Build()
+		if len(qb.selectColumns) > 0 {
+			sb.Select(qb.selectColumns...)
+		}
+		return sb.Build()
 	case "UPDATE":
 		if _, ok := qb.builder.(*BuilderUpdate); !ok {
 			qb.builder = UpdateBuilder(qb.conn.ConnName)
 		}
+		ub := qb.builder.(*BuilderUpdate)
+		if qb.tableName != "" {
+			ub.Update(qb.tableName)
+		}
 		if len(qb.updateColumns) > 0 && len(qb.updateValues) > 0 {
 			assignments := make([]string, len(qb.updateColumns))
 			for i, col := range qb.updateColumns {
-				assignments[i] = qb.builder.(*BuilderUpdate).Assign(col, qb.updateValues[0][i])
+				assignments[i] = ub.Assign(col, qb.updateValues[0][i])
 			}
-			qb.builder.(*BuilderUpdate).Set(assignments...)
+			ub.Set(assignments...)
 		}
-		return qb.builder.(*BuilderUpdate).Build()
+		return ub.Build()
 	case "DELETE":
 		if _, ok := qb.builder.(*BuilderDelete); !ok {
 			qb.builder = DeleteBuilder(qb.conn.ConnName)
 		}
-		return qb.builder.(*BuilderDelete).Build()
+		db := qb.builder.(*BuilderDelete)
+		if qb.tableName != "" {
+			db.DeleteFrom(qb.tableName)
+		}
+		return db.Build()
 	case "INSERT":
 		if _, ok := qb.builder.(*BuilderInsert); !ok {
 			qb.builder = InsertBuilder(qb.conn.ConnName)
