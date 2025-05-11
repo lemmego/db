@@ -3,587 +3,620 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
-	"fmt"
-	"strings"
+
+	"github.com/huandu/go-sqlbuilder"
+	"github.com/jmoiron/sqlx"
+	"github.com/k0kubun/pp/v3"
 )
 
-// Cond represents a condition for SQL WHERE clauses
-type Cond struct {
-	Column   string
-	Operator string
-	Value    interface{}
+// Cond interface contains the convenience methods for building SQL conditions.
+type Cond interface {
+	Equal(field string, value interface{}) string
+	E(field string, value interface{}) string
+	EQ(field string, value interface{}) string
+	NotEqual(field string, value interface{}) string
+	NE(field string, value interface{}) string
+	NEQ(field string, value interface{}) string
+	GreaterThan(field string, value interface{}) string
+	G(field string, value interface{}) string
+	GT(field string, value interface{}) string
+	GreaterEqualThan(field string, value interface{}) string
+	GE(field string, value interface{}) string
+	GTE(field string, value interface{}) string
+	LessThan(field string, value interface{}) string
+	L(field string, value interface{}) string
+	LT(field string, value interface{}) string
+	LessEqualThan(field string, value interface{}) string
+	LE(field string, value interface{}) string
+	LTE(field string, value interface{}) string
+	In(field string, values ...interface{}) string
+	NotIn(field string, values ...interface{}) string
+	Like(field string, value interface{}) string
+	ILike(field string, value interface{}) string
+	NotLike(field string, value interface{}) string
+	NotILike(field string, value interface{}) string
+	IsNull(field string) string
+	IsNotNull(field string) string
+	Between(field string, lower, upper interface{}) string
+	NotBetween(field string, lower, upper interface{}) string
+	Or(orExpr ...string) string
+	And(andExpr ...string) string
+	Not(notExpr string) string
+	Exists(subquery interface{}) string
+	NotExists(subquery interface{}) string
+	Any(field, op string, values ...interface{}) string
+	All(field, op string, values ...interface{}) string
+	Some(field, op string, values ...interface{}) string
+	IsDistinctFrom(field string, value interface{}) string
+	IsNotDistinctFrom(field string, value interface{}) string
+	Var(value interface{}) string
 }
 
-type CondGroup struct {
-	Conditions []*Cond
-	Logical    string // Default to "AND" or "OR" based on method
+// Builder provides the common query builder methods.
+type Builder interface {
+	sqlbuilder.Builder
 }
 
-type Join struct {
-	Table    string
-	First    string
-	Operator string
-	Second   string
-	JoinType string // e.g., "INNER", "LEFT", "RIGHT"
-}
-
-// QueryBuilder provides methods for building SQL queries
+// QueryBuilder is a builder for SQL queries
 type QueryBuilder struct {
-	config          *Config
-	db              *sql.DB
-	table           string
-	conditionGroups []*CondGroup
-	orderBy         string
-	selects         []string
-	distinct        bool
-	groupBy         []string
-	having          []*Cond
-	joins           []*Join
-	offset          int
-	limit           int
+	conn          *Connection
+	builder       Builder
+	tableName     string
+	debug         bool
+	queryType     string
+	selectColumns []string
+	updateColumns []string
+	updateValues  []any
+	insertColumns []string
+	insertValues  [][]any
 }
 
-// Query initializes a new QueryBuilder with a database connection
-func Query(connName ...string) *QueryBuilder {
-	var name string
-	if len(connName) > 0 && connName[0] != "" {
-		name = connName[0]
-	} else {
-		name = "default"
-	}
-
-	return &QueryBuilder{
-		db:              Get(name).DB,
-		config:          Get(name).Config,
-		conditionGroups: make([]*CondGroup, 0),
-		groupBy:         make([]string, 0),
-		having:          make([]*Cond, 0),
-		offset:          0,
-		limit:           0,
-	}
+// BuilderStruct provides common methods for building SQL queries using a struct.
+type BuilderStruct struct {
+	*sqlbuilder.Struct
 }
 
-// Table sets the table for the query. This is a wrapper around Query for syntax consistency.
-func (qb *QueryBuilder) Table(table string) *QueryBuilder {
-	qb.table = table
+// BuilderCreateTable provides the query builder methods for creating tables.
+type BuilderCreateTable struct {
+	*sqlbuilder.CreateTableBuilder
+}
+
+// BuilderSelect provides the query builder methods for selecting.
+type BuilderSelect struct {
+	*sqlbuilder.SelectBuilder
+}
+
+// BuilderInsert provides the query builder methods for inserting.
+type BuilderInsert struct {
+	*sqlbuilder.InsertBuilder
+}
+
+// BuilderUpdate provides the query builder methods for updating.
+type BuilderUpdate struct {
+	*sqlbuilder.UpdateBuilder
+}
+
+// BuilderDelete provides the query builder methods for deleting.
+type BuilderDelete struct {
+	*sqlbuilder.DeleteBuilder
+}
+
+// NewQueryBuilder creates a new QueryBuilder instance.
+func NewQueryBuilder(conn *Connection) *QueryBuilder {
+	return &QueryBuilder{conn: conn}
+}
+
+// SetBuilder sets the builder for the query builder.
+func (qb *QueryBuilder) SetBuilder(builder Builder) *QueryBuilder {
+	qb.builder = builder
 	return qb
 }
 
-// Table sets the table for the query. This is a wrapper around Query for syntax consistency.
-func Table(table string, connName ...string) *QueryBuilder {
-	var name string
-	if len(connName) > 0 && connName[0] != "" {
-		name = connName[0]
-	} else {
-		name = "default"
-	}
+// GetBuilder returns the current builder.
+func (qb *QueryBuilder) GetBuilder() Builder {
+	return qb.builder
+}
 
-	qb := Query(name).Table(table)
+// Table sets the table name for the query builder.
+func (qb *QueryBuilder) Table(name string) *QueryBuilder {
+	qb.tableName = name
+	switch b := qb.builder.(type) {
+	case *BuilderSelect:
+		b.From(name)
+	case *BuilderUpdate:
+		b.Update(name)
+	case *BuilderDelete:
+		b.DeleteFrom(name)
+	}
 	return qb
 }
 
-// Where adds a condition to the WHERE clause with '=' operator by default
-func (qb *QueryBuilder) Where(column string, value interface{}) *QueryBuilder {
-	return qb.WhereConds([]*Cond{{Column: column, Operator: "=", Value: value}})
-}
-
-// WhereMap adds multiple conditions to the WHERE clause using '=' operator for all
-func (qb *QueryBuilder) WhereMap(conditions map[string]interface{}) *QueryBuilder {
-	conds := make([]*Cond, 0, len(conditions))
-	for column, value := range conditions {
-		conds = append(conds, &Cond{Column: column, Operator: "=", Value: value})
-	}
-	return qb.WhereConds(conds)
-}
-
-// WhereConds adds multiple conditions to the WHERE clause using 'AND'
-func (qb *QueryBuilder) WhereConds(conds []*Cond) *QueryBuilder {
-	return qb.addConditionGroup(conds, "AND")
-}
-
-// OrWhere adds a condition to the WHERE clause with 'OR' operator
-func (qb *QueryBuilder) OrWhere(column string, value interface{}) *QueryBuilder {
-	return qb.OrWhereConds([]*Cond{{Column: column, Operator: "=", Value: value}})
-}
-
-// OrWhereMap adds multiple conditions to the WHERE clause using 'OR' operator for all
-func (qb *QueryBuilder) OrWhereMap(conditions map[string]interface{}) *QueryBuilder {
-	conds := make([]*Cond, 0, len(conditions))
-	for column, value := range conditions {
-		conds = append(conds, &Cond{Column: column, Operator: "=", Value: value})
-	}
-	return qb.OrWhereConds(conds)
-}
-
-// OrWhereConds adds multiple conditions to the WHERE clause using 'OR'
-func (qb *QueryBuilder) OrWhereConds(conds []*Cond) *QueryBuilder {
-	return qb.addConditionGroup(conds, "OR")
-}
-
-// First fetches the first result matching the conditions
-func (qb *QueryBuilder) First() (map[string]interface{}, error) {
-	qb.Limit(1) // Ensure only one row is returned
-	rows, err := qb.executeSelect()
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return nil, errors.New("no rows found")
-	}
-
-	result := make(map[string]interface{})
-	columns, _ := rows.Columns()
-	values := make([]interface{}, len(columns))
-	valuePtrs := make([]interface{}, len(columns))
-
-	for i := range columns {
-		valuePtrs[i] = &values[i]
-	}
-
-	if err := rows.Scan(valuePtrs...); err != nil {
-		return nil, err
-	}
-
-	for i, col := range columns {
-		result[col] = values[i]
-	}
-
-	return result, nil
-}
-
-// GroupBy adds columns to group by in the SQL query
-func (qb *QueryBuilder) GroupBy(columns ...string) *QueryBuilder {
-	qb.groupBy = append(qb.groupBy, columns...)
+// Join adds a JOIN clause to the query builder.
+func (qb *QueryBuilder) Join(table string, onExpr ...string) *QueryBuilder {
+	qb.builder.(*BuilderSelect).Join(table, onExpr...)
 	return qb
 }
 
-// Having adds conditions to the HAVING clause in the SQL query
-func (qb *QueryBuilder) Having(column, operator string, value interface{}) *QueryBuilder {
-	qb.having = append(qb.having, &Cond{Column: column, Operator: operator, Value: value})
-	return qb
-}
-
-// Get fetches all results matching the conditions, including GROUP BY and HAVING
-func (qb *QueryBuilder) Get() ([]map[string]interface{}, error) {
-	rows, err := qb.executeSelect()
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	results := make([]map[string]interface{}, 0)
-	columns, _ := rows.Columns()
-	values := make([]interface{}, len(columns))
-	valuePtrs := make([]interface{}, len(columns))
-
-	for i := range columns {
-		valuePtrs[i] = &values[i]
-	}
-
-	for rows.Next() {
-		result := make(map[string]interface{})
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, err
-		}
-		for i, col := range columns {
-			result[col] = values[i]
-		}
-		results = append(results, result)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return results, nil
-}
-
-// Value fetches values for specified columns
-func (qb *QueryBuilder) Value(columns ...string) ([]map[string]interface{}, error) {
-	if len(columns) == 0 {
-		return nil, errors.New("at least one column must be specified")
-	}
-	qb.selects = columns
-	return qb.Get()
-}
-
-// Find fetches a row by its primary key
-func (qb *QueryBuilder) Find(id interface{}) ([]map[string]interface{}, error) {
-	qb.Where("id", id)
-	return qb.Get()
-}
-
-// OrderBy sets the column for ORDER BY clause
-func (qb *QueryBuilder) OrderBy(column string) *QueryBuilder {
-	qb.orderBy = column
-	return qb
-}
-
-// Count returns the number of rows matching the conditions
-func (qb *QueryBuilder) Count() (int, error) {
-	query := "SELECT COUNT(*) FROM " + qb.table + qb.buildWhereClause()
-	var count int
-	err := qb.db.QueryRowContext(context.Background(), query).Scan(&count)
-	return count, err
-}
-
-// Max gets the maximum value of the specified column
-func (qb *QueryBuilder) Max(column string) (float64, error) {
-	query := "SELECT MAX(" + column + ") FROM " + qb.table + qb.buildWhereClause()
-	var max float64
-	err := qb.db.QueryRowContext(context.Background(), query).Scan(&max)
-	return max, err
-}
-
-// Avg computes the average of the specified column
-func (qb *QueryBuilder) Avg(column string) (float64, error) {
-	query := "SELECT AVG(" + column + ") FROM " + qb.table + qb.buildWhereClause()
-	var avg float64
-	err := qb.db.QueryRowContext(context.Background(), query).Scan(&avg)
-	return avg, err
-}
-
-// Exists checks if any rows match the conditions
-func (qb *QueryBuilder) Exists() (bool, error) {
-	query := "SELECT COUNT(*) FROM " + qb.table + qb.buildWhereClause()
-	var count int
-	err := qb.db.QueryRowContext(context.Background(), query, qb.getConditionValues()...).Scan(&count)
-	return count > 0, err
-}
-
-// Select specifies which columns to return
+// Select sets the columns to select
 func (qb *QueryBuilder) Select(columns ...string) *QueryBuilder {
-	qb.selects = columns
+	qb.queryType = "SELECT"
+	qb.builder = SelectBuilder(qb.conn.ConnName)
+	qb.selectColumns = columns
 	return qb
 }
 
-// Distinct ensures returned rows are unique
-func (qb *QueryBuilder) Distinct() *QueryBuilder {
-	qb.distinct = true
+// Insert sets up an INSERT query
+func (qb *QueryBuilder) Insert(columns []string, values [][]any) *QueryBuilder {
+	qb.queryType = "INSERT"
+	qb.builder = InsertBuilder(qb.conn.ConnName)
+	qb.insertColumns = columns
+	qb.insertValues = values
 	return qb
 }
 
-// Skip sets the number of records to skip before fetching results
-func (qb *QueryBuilder) Skip(offset int) *QueryBuilder {
-	qb.offset = offset
+// Update sets up an UPDATE query
+func (qb *QueryBuilder) Update(columns []string, values []any) *QueryBuilder {
+	qb.queryType = "UPDATE"
+	qb.builder = UpdateBuilder(qb.conn.ConnName)
+	qb.updateColumns = columns
+	qb.updateValues = values
 	return qb
 }
 
-// Offset is an alias for Skip
-func (qb *QueryBuilder) Offset(offset int) *QueryBuilder {
-	return qb.Skip(offset)
-}
-
-// Take sets the number of records to return from the query
-func (qb *QueryBuilder) Take(limit int) *QueryBuilder {
-	qb.limit = limit
+// Delete sets up a DELETE query
+func (qb *QueryBuilder) Delete() *QueryBuilder {
+	qb.queryType = "DELETE"
+	qb.builder = DeleteBuilder(qb.conn.ConnName)
 	return qb
 }
 
-// Limit is an alias for Take
+// AsCreateTable returns the builder as a CreateTable builder.
+func (qb *QueryBuilder) AsCreateTable() *BuilderCreateTable {
+	if qb.builder == nil {
+		ctb := CreateTableBuilder(qb.conn.ConnName)
+		qb.SetBuilder(ctb)
+		return ctb
+	}
+	return qb.builder.(*BuilderCreateTable)
+}
+
+// AsSelect returns the builder as a Select builder.
+func (qb *QueryBuilder) AsSelect() *BuilderSelect {
+	if qb.builder == nil {
+		sb := SelectBuilder(qb.conn.ConnName)
+		qb.SetBuilder(sb)
+		return sb
+	}
+	return qb.builder.(*BuilderSelect)
+}
+
+// AsInsert returns the builder as an Insert builder.
+func (qb *QueryBuilder) AsInsert() *BuilderInsert {
+	if qb.builder == nil {
+		ib := InsertBuilder(qb.conn.ConnName)
+		qb.SetBuilder(ib)
+		return ib
+	}
+	return qb.builder.(*BuilderInsert)
+}
+
+// AsUpdate returns the builder as an Update builder.
+func (qb *QueryBuilder) AsUpdate() *BuilderUpdate {
+	if qb.builder == nil {
+		ub := UpdateBuilder(qb.conn.ConnName)
+		qb.SetBuilder(ub)
+		return ub
+	}
+	return qb.builder.(*BuilderUpdate)
+}
+
+// AsDelete returns the builder as a Delete builder.
+func (qb *QueryBuilder) AsDelete() *BuilderDelete {
+	if qb.builder == nil {
+		db := DeleteBuilder(qb.conn.ConnName)
+		qb.SetBuilder(db)
+		return db
+	}
+	return qb.builder.(*BuilderDelete)
+}
+
+// Build builds the SQL query and returns the SQL string and arguments
+func (qb *QueryBuilder) Build() (string, []any) {
+	// Initialize builder if not set
+	if qb.builder == nil {
+		switch qb.queryType {
+		case "SELECT":
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		case "UPDATE":
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		case "DELETE":
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		case "INSERT":
+			qb.builder = InsertBuilder(qb.conn.ConnName)
+		default:
+			// Default to SELECT if no query type specified
+			qb.queryType = "SELECT"
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
+	}
+
+	// Validate builder type matches query type
+	switch qb.queryType {
+	case "SELECT":
+		if _, ok := qb.builder.(*BuilderSelect); !ok {
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
+		sb := qb.builder.(*BuilderSelect)
+		if qb.tableName != "" {
+			sb.From(qb.tableName)
+		}
+		if len(qb.selectColumns) > 0 {
+			sb.Select(qb.selectColumns...)
+		}
+		return sb.Build()
+	case "UPDATE":
+		if _, ok := qb.builder.(*BuilderUpdate); !ok {
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		}
+		ub := qb.builder.(*BuilderUpdate)
+		if qb.tableName != "" {
+			ub.Update(qb.tableName)
+		}
+		if len(qb.updateColumns) > 0 && len(qb.updateValues) > 0 {
+			assignments := make([]string, len(qb.updateColumns))
+			for i, col := range qb.updateColumns {
+				assignments[i] = ub.Assign(col, qb.updateValues[i])
+			}
+			ub.Set(assignments...)
+		}
+		return ub.Build()
+	case "DELETE":
+		if _, ok := qb.builder.(*BuilderDelete); !ok {
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		}
+		db := qb.builder.(*BuilderDelete)
+		if qb.tableName != "" {
+			db.DeleteFrom(qb.tableName)
+		}
+		return db.Build()
+	case "INSERT":
+		if _, ok := qb.builder.(*BuilderInsert); !ok {
+			qb.builder = InsertBuilder(qb.conn.ConnName)
+		}
+		ib := qb.builder.(*BuilderInsert)
+		if qb.tableName != "" {
+			ib.InsertInto(qb.tableName)
+		}
+		if len(qb.insertColumns) > 0 {
+			ib.Cols(qb.insertColumns...)
+			for _, row := range qb.insertValues {
+				ib.Values(row...)
+			}
+		}
+		return ib.Build()
+	default:
+		// This should never happen due to the initialization above
+		return "", nil
+	}
+}
+
+// Where adds a WHERE clause to the query
+func (qb *QueryBuilder) Where(condition ConditionFunc) *QueryBuilder {
+	if qb.builder == nil {
+		switch qb.queryType {
+		case "SELECT":
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		case "UPDATE":
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		case "DELETE":
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		default:
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
+	}
+	// Call the builder's Where method
+	switch b := qb.builder.(type) {
+	case *BuilderSelect:
+		b.Where(condition(qb.builder))
+	case *BuilderUpdate:
+		b.Where(condition(qb.builder))
+	case *BuilderDelete:
+		b.Where(condition(qb.builder))
+	}
+	return qb
+}
+
+// OrderBy adds an ORDER BY clause to the query builder.
+func (qb *QueryBuilder) OrderBy(col ...string) *QueryBuilder {
+	switch builder := qb.builder.(type) {
+	case *BuilderSelect:
+		builder.OrderBy(col...)
+	case *BuilderUpdate:
+		builder.OrderBy(col...)
+	case *BuilderDelete:
+		builder.OrderBy(col...)
+	}
+
+	return qb
+}
+
+// Limit adds a LIMIT clause to the query builder.
 func (qb *QueryBuilder) Limit(limit int) *QueryBuilder {
-	return qb.Take(limit)
+	switch builder := qb.builder.(type) {
+	case *BuilderSelect:
+		builder.Limit(limit)
+	case *BuilderUpdate:
+		builder.Limit(limit)
+	case *BuilderDelete:
+		builder.Limit(limit)
+	}
+
+	return qb
 }
 
-func (qb *QueryBuilder) executeSelect() (*sql.Rows, error) {
-	query := "SELECT " + qb.buildSelectClause() + " FROM " + qb.table +
-		qb.buildJoinClause() +
-		qb.buildWhereClause() +
-		qb.buildGroupByClause() +
-		qb.buildHavingClause() +
-		qb.buildOrderByClause()
-
-	if qb.limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", qb.limit)
+// Offset adds an OFFSET clause to the query builder.
+func (qb *QueryBuilder) Offset(offset int) *QueryBuilder {
+	switch builder := qb.builder.(type) {
+	case *BuilderSelect:
+		builder.Offset(offset)
 	}
 
-	if qb.offset > 0 {
-		query += fmt.Sprintf(" OFFSET %d", qb.offset)
-	}
-
-	return qb.db.QueryContext(context.Background(), query, append(qb.getConditionValues(), qb.getHavingValues()...)...)
+	return qb
 }
 
-func (qb *QueryBuilder) buildGroupByClause() string {
-	if len(qb.groupBy) == 0 {
-		return ""
+// GroupBy adds a GROUP BY clause to the query builder.
+func (qb *QueryBuilder) GroupBy(col ...string) *QueryBuilder {
+	switch builder := qb.builder.(type) {
+	case *BuilderSelect:
+		builder.GroupBy(col...)
 	}
-	return " GROUP BY " + strings.Join(qb.groupBy, ", ")
+
+	return qb
 }
 
-func (qb *QueryBuilder) buildHavingClause() string {
-	if len(qb.having) == 0 {
-		return ""
-	}
-	clause := " HAVING "
-	for i, cond := range qb.having {
-		if i > 0 {
-			clause += " AND "
-		}
-		clause += cond.Column + " " + cond.Operator + " ?"
-	}
-	return clause
-}
-
-func (qb *QueryBuilder) getHavingValues() []interface{} {
-	values := make([]interface{}, 0)
-	for _, cond := range qb.having {
-		values = append(values, cond.Value)
-	}
-	return values
-}
-
-func (qb *QueryBuilder) buildWhereClause() string {
-	if len(qb.conditionGroups) == 0 {
-		return ""
-	}
-	var clauses []string
-	for _, group := range qb.conditionGroups {
-		groupClause := ""
-		for j, cond := range group.Conditions {
-			if j > 0 {
-				groupClause += " " + group.Logical + " "
-			}
-			groupClause += cond.Column + " " + cond.Operator + " ?"
-		}
-		if len(group.Conditions) > 1 {
-			groupClause = "(" + groupClause + ")"
-		}
-		clauses = append(clauses, groupClause)
-	}
-
-	// Check if there's any 'OR' group, if so, we need to adjust how we join clauses
-	hasOr := false
-	for _, group := range qb.conditionGroups {
-		if group.Logical == "OR" {
-			hasOr = true
-			break
+// Having adds a HAVING clause to the query builder.
+func (qb *QueryBuilder) Having(condFuncs ...ConditionFunc) *QueryBuilder {
+	for _, condFunc := range condFuncs {
+		switch builder := qb.builder.(type) {
+		case *BuilderSelect:
+			builder.Having(condFunc(qb.builder))
 		}
 	}
 
-	if hasOr {
-		// If there's an 'OR' group, we join all clauses with 'OR' instead of 'AND'
-		return " WHERE " + strings.Join(clauses, " OR ")
+	return qb
+}
+
+// Fetch executes the query and returns the rows
+func (qb *QueryBuilder) Fetch(ctx context.Context) (*sqlx.Rows, error) {
+	if qb.builder == nil {
+		qb.builder = SelectBuilder(qb.conn.ConnName)
+	}
+
+	sqlStmt, args := qb.Build()
+	if qb.debug {
+		pp.Println(sqlStmt, args)
+	}
+
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.QueryxContext(ctx, sqlStmt, args...)
+	}
+	return qb.conn.DB.QueryxContext(ctx, sqlStmt, args...)
+}
+
+// Debug enables or disables debug mode for the query builder.
+func (qb *QueryBuilder) Debug(log bool) *QueryBuilder {
+	qb.debug = log
+	return qb
+}
+
+// Scan executes the query and scans the result into dest
+func (qb *QueryBuilder) Scan(ctx context.Context, dest interface{}) error {
+	if qb.builder == nil {
+		qb.builder = SelectBuilder(qb.conn.ConnName)
+	}
+
+	query, args := qb.Build()
+	if qb.debug {
+		pp.Println(query, args)
+	}
+
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.GetContext(ctx, dest, query, args...)
+	}
+	return qb.conn.DB.GetContext(ctx, dest, query, args...)
+}
+
+// ScanAll executes the query and scans all results into dest
+func (qb *QueryBuilder) ScanAll(ctx context.Context, dest interface{}) error {
+	if qb.builder == nil {
+		qb.builder = SelectBuilder(qb.conn.ConnName)
+	}
+
+	query, args := qb.Build()
+	if qb.debug {
+		pp.Println(query, args)
+	}
+
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.SelectContext(ctx, dest, query, args...)
+	}
+	return qb.conn.DB.SelectContext(ctx, dest, query, args...)
+}
+
+// Exec executes the query and returns the result
+func (qb *QueryBuilder) Exec(ctx context.Context) (sql.Result, error) {
+	if qb.builder == nil {
+		switch qb.queryType {
+		case "SELECT":
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		case "UPDATE":
+			qb.builder = UpdateBuilder(qb.conn.ConnName)
+		case "DELETE":
+			qb.builder = DeleteBuilder(qb.conn.ConnName)
+		default:
+			qb.builder = SelectBuilder(qb.conn.ConnName)
+		}
+	}
+
+	query, args := qb.Build()
+	if qb.debug {
+		pp.Println(query, args)
+	}
+
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.ExecContext(ctx, query, args...)
+	}
+	return qb.conn.DB.ExecContext(ctx, query, args...)
+}
+
+// getBuilderForDialect returns the appropriate builder flavor based on dialect
+func getBuilderForDialect(driver string) sqlbuilder.Flavor {
+	return GetFlavorForDialect(driver)
+}
+
+// Model creates a new Struct builder for the given struct value.
+func Model[T any](connName ...string) *BuilderStruct {
+	var structValue T
+	builder := sqlbuilder.NewStruct(structValue)
+	return &BuilderStruct{builder.For(getBuilderForDialect(Get(connName...).Config.Driver))}
+}
+
+// CreateTableBuilder creates a new CreateTable builder.
+func CreateTableBuilder(connName ...string) *BuilderCreateTable {
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderCreateTable{flavor.NewCreateTableBuilder()}
+}
+
+// SelectBuilder creates a new Select builder.
+func SelectBuilder(connName ...string) *BuilderSelect {
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderSelect{flavor.NewSelectBuilder()}
+}
+
+// InsertBuilder creates a new Insert builder.
+func InsertBuilder(connName ...string) *BuilderInsert {
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderInsert{flavor.NewInsertBuilder()}
+}
+
+// UpdateBuilder creates a new Update builder.
+func UpdateBuilder(connName ...string) *BuilderUpdate {
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderUpdate{flavor.NewUpdateBuilder()}
+}
+
+// DeleteBuilder creates a new Delete builder.
+func DeleteBuilder(connName ...string) *BuilderDelete {
+	conn := Get(connName...)
+	flavor := getBuilderForDialect(conn.Config.Driver)
+	return &BuilderDelete{flavor.NewDeleteBuilder()}
+}
+
+// Page adds pagination to the query using offset-based pagination.
+// page is 1-based, perPage is the number of items per page.
+func (qb *QueryBuilder) Page(page, perPage int) *QueryBuilder {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 10
+	}
+
+	offset := (page - 1) * perPage
+	return qb.Limit(perPage).Offset(offset)
+}
+
+// Cursor adds cursor-based pagination to the query.
+// cursor is the value of the cursor field, direction is "next" or "prev",
+// and cursorField is the field to use for cursor-based pagination.
+func (qb *QueryBuilder) Cursor(cursor string, direction string, cursorField string) *QueryBuilder {
+	if cursor == "" {
+		return qb.Limit(1)
+	}
+
+	switch direction {
+	case "next":
+		qb.Where(func(b Builder) string {
+			return b.(Cond).GreaterThan(cursorField, cursor)
+		})
+	case "prev":
+		qb.Where(func(b Builder) string {
+			return b.(Cond).LessThan(cursorField, cursor)
+		})
+	default:
+		// Default to next if direction is invalid
+		qb.Where(func(b Builder) string {
+			return b.(Cond).GreaterThan(cursorField, cursor)
+		})
+	}
+
+	// Ensure we have proper ordering
+	if direction == "prev" {
+		qb.OrderBy(cursorField + " DESC")
 	} else {
-		// Otherwise, we use AND
-		return " WHERE " + strings.Join(clauses, " AND ")
+		qb.OrderBy(cursorField)
 	}
+
+	return qb.Limit(1)
 }
 
-func (qb *QueryBuilder) buildOrderByClause() string {
-	if qb.orderBy == "" {
-		return ""
-	}
-	return " ORDER BY " + qb.orderBy
-}
-
-func (qb *QueryBuilder) buildSelectClause() string {
-	if len(qb.selects) == 0 {
-		return "*"
-	}
-	if qb.distinct {
-		return "DISTINCT " + joinSelects(qb.selects)
-	}
-	return joinSelects(qb.selects)
-}
-
-func (qb *QueryBuilder) buildJoinClause() string {
-	if len(qb.joins) == 0 {
-		return ""
-	}
-	var joinClause strings.Builder
-	for _, join := range qb.joins {
-		joinClause.WriteString(fmt.Sprintf(" %s JOIN %s ON %s %s %s", join.JoinType, join.Table, join.First, join.Operator, join.Second))
-	}
-	return joinClause.String()
-}
-
-// Insert adds new records into the table
-func (qb *QueryBuilder) Insert(data []map[string]interface{}) (sql.Result, error) {
-	if len(data) == 0 {
-		return nil, errors.New("no data to insert")
-	}
-
-	columns := make([]string, 0)
-	values := make([]interface{}, 0)
-
-	// Use the first entry to determine columns
-	for key := range data[0] {
-		columns = append(columns, key)
-	}
-	placeholders := make([]string, len(data))
-	for i, item := range data {
-		rowValues := make([]interface{}, len(columns))
-		for j, col := range columns {
-			rowValues[j] = item[col]
-		}
-		values = append(values, rowValues...)
-		placeholders[i] = "(" + strings.Repeat("?,", len(columns)-1) + "?)"
-	}
-
-	query := "INSERT INTO " + qb.table + " (" + strings.Join(columns, ", ") + ") VALUES " + strings.Join(placeholders, ", ")
-	return qb.db.ExecContext(context.Background(), query, values...)
-}
-
-// InsertGetId adds a single record and returns the ID of the inserted item
-func (qb *QueryBuilder) InsertGetId(data map[string]interface{}) (int64, error) {
-	if len(data) == 0 {
-		return 0, errors.New("no data to insert")
-	}
-
-	columns := make([]string, 0)
-	values := make([]interface{}, 0)
-	placeholders := make([]string, 0)
-
-	for key, value := range data {
-		columns = append(columns, key)
-		values = append(values, value)
-		placeholders = append(placeholders, "?")
-	}
-
-	query := "INSERT INTO " + qb.table + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
-	result, err := qb.db.ExecContext(context.Background(), query, values...)
+// Begin starts a new transaction.
+func (qb *QueryBuilder) Begin(ctx context.Context) (*QueryBuilder, error) {
+	_, err := qb.conn.BeginTx(ctx)
 	if err != nil {
-		return 0, err
-	}
-	return result.LastInsertId()
-}
-
-// Update modifies records in the table based on conditions, including support for JSON column operations
-func (qb *QueryBuilder) Update(data map[string]interface{}) (sql.Result, error) {
-	if len(data) == 0 {
-		return nil, errors.New("no data to update")
-	}
-
-	setClauses := make([]string, 0)
-	values := make([]interface{}, 0)
-
-	for key, value := range data {
-		// Check if the key contains JSON path notation
-		if strings.Contains(key, "->") {
-			jsonParts := strings.Split(key, "->")
-			column := jsonParts[0]
-			path := strings.Join(jsonParts[1:], "->")
-			switch qb.config.Driver {
-			case DialectSQLite:
-				// SQLite doesn't support JSON functions in UPDATE statements natively
-				// You might need to handle this manually or through triggers
-				return nil, errors.New("JSON operations in UPDATE not supported for SQLite")
-			case DialectMySQL:
-				setClauses = append(setClauses, fmt.Sprintf("JSON_SET(%s, '$."+path+"', ?)", column))
-			case DialectPgSQL:
-				// PostgreSQL uses -> for access, ->> for text value, and #> for path
-				setClauses = append(setClauses, fmt.Sprintf("%s = jsonb_set(%s, '{ %s }', ?)", column, column, path))
-			default:
-				return nil, errors.New("unsupported dialect for JSON update")
-			}
-		} else {
-			setClauses = append(setClauses, fmt.Sprintf("%s = ?", key))
-		}
-		values = append(values, value)
-	}
-
-	query := "UPDATE " + qb.table + " SET " + strings.Join(setClauses, ", ") + qb.buildWhereClause()
-	args := append(values, qb.getConditionValues()...)
-
-	return qb.db.ExecContext(context.Background(), query, args...)
-}
-
-// UpdateOrInsert updates a record if it exists, otherwise inserts a new record
-func (qb *QueryBuilder) UpdateOrInsert(unique map[string]interface{}, data map[string]interface{}) (sql.Result, error) {
-	// Check if the record exists
-	result, err := qb.WhereConds(qb.convertMapToConds(unique)).Get()
-	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
 
-	if len(result) > 0 {
-		// Update if record exists
-		return qb.Update(data)
-	} else {
-		// Combine unique and data for insert if record doesn't exist
-		for k, v := range unique {
-			data[k] = v
+	// Create a new QueryBuilder with the same connection and transaction
+	txQB := &QueryBuilder{
+		conn:      qb.conn,
+		builder:   qb.builder,
+		tableName: qb.tableName,
+		debug:     qb.debug,
+	}
+
+	return txQB, nil
+}
+
+// Commit commits the transaction.
+func (qb *QueryBuilder) Commit() error {
+	return qb.conn.Commit()
+}
+
+// Rollback rolls back the transaction.
+func (qb *QueryBuilder) Rollback() error {
+	return qb.conn.Rollback()
+}
+
+// Transaction executes the given function within a transaction.
+// If the function returns an error, the transaction is rolled back.
+// Otherwise, the transaction is committed.
+func (qb *QueryBuilder) Transaction(ctx context.Context, fn func(*QueryBuilder) error) error {
+	txQB, err := qb.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	var txErr error
+	defer func() {
+		if p := recover(); p != nil {
+			// A panic occurred, rollback and repanic
+			_ = txQB.conn.Rollback()
+			// Re-throw the panic
+			panic(p)
+		} else if txErr != nil {
+			// Something went wrong, rollback
+			_ = txQB.conn.Rollback()
+		} else {
+			// All good, commit
+			txErr = txQB.conn.Commit()
 		}
-		return qb.Insert([]map[string]interface{}{data})
-	}
-}
+	}()
 
-// Delete removes records from the table based on conditions
-func (qb *QueryBuilder) Delete() (sql.Result, error) {
-	query := "DELETE FROM " + qb.table + qb.buildWhereClause()
-	return qb.db.ExecContext(context.Background(), query, qb.getConditionValues()...)
-}
-
-// Truncate removes all records from the table
-func (qb *QueryBuilder) Truncate() error {
-	query := ""
-	switch qb.config.Driver {
-	case DialectSQLite:
-		// SQLite doesn't have a TRUNCATE statement; we use DELETE instead
-		query = "DELETE FROM " + qb.table
-	case DialectMySQL:
-		// MySQL TRUNCATE TABLE
-		query = "TRUNCATE TABLE " + qb.table
-	case DialectPgSQL:
-		// PostgreSQL TRUNCATE TABLE
-		query = "TRUNCATE TABLE " + qb.table + " RESTART IDENTITY"
-	default:
-		return errors.New("unsupported dialect for truncate operation")
-	}
-
-	_, err := qb.db.ExecContext(context.Background(), query)
-	return err
-}
-
-func (qb *QueryBuilder) Join(table, first, operator, second string) *QueryBuilder {
-	qb.joins = append(qb.joins, &Join{
-		Table:    table,
-		First:    first,
-		Operator: operator,
-		Second:   second,
-		JoinType: "INNER", // Default to INNER JOIN
-	})
-	return qb
-}
-
-func (qb *QueryBuilder) JoinType(joinType string) *QueryBuilder {
-	if len(qb.joins) > 0 {
-		qb.joins[len(qb.joins)-1].JoinType = joinType
-	}
-	return qb
-}
-
-func (qb *QueryBuilder) getConditionValues() []interface{} {
-	values := make([]interface{}, 0)
-	for _, group := range qb.conditionGroups {
-		for _, cond := range group.Conditions {
-			values = append(values, cond.Value)
-		}
-	}
-	return values
-}
-
-// Method to add conditions with a specific logical operator
-func (qb *QueryBuilder) addConditionGroup(conds []*Cond, logical string) *QueryBuilder {
-	qb.conditionGroups = append(qb.conditionGroups, &CondGroup{
-		Conditions: conds,
-		Logical:    logical,
-	})
-	return qb
-}
-
-func (qb *QueryBuilder) convertMapToConds(data map[string]interface{}) []*Cond {
-	conds := make([]*Cond, 0)
-	for key, value := range data {
-		conds = append(conds, &Cond{Column: key, Operator: "=", Value: value})
-	}
-	return conds
-}
-
-func joinSelects(columns []string) string {
-	return "`" + strings.Join(columns, "`, `") + "`"
+	txErr = fn(txQB)
+	return txErr
 }

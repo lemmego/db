@@ -1,23 +1,19 @@
 package db
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
 	"sync"
-	"time"
 )
 
 var (
-	once     sync.Once
-	instance *DatabaseManager
+	once                  sync.Once
+	instance              *DatabaseManager
+	ErrConnectionNotFound = errors.New("database connection not found")
 )
 
-func ProvideConfig(cb func() *Config) *Config {
-	return cb()
-}
-
+// Config contains the configuration for the database connection
 type Config struct {
 	ConnName string
 	Driver   string
@@ -29,38 +25,7 @@ type Config struct {
 	Params   string
 }
 
-type Connection struct {
-	*Config
-	*sql.DB
-}
-
-type Model struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func NewConnection(config *Config) *Connection {
-	return &Connection{config, nil}
-}
-
-func (c *Connection) Open() *sql.DB {
-	switch c.Config.Driver {
-	case DialectSQLite:
-		c.DB = NewSQLiteConnection(c.Config).Connect()
-	case DialectMySQL:
-		c.DB = NewMySQLConnection(c.Config).Connect()
-	case DialectPgSQL:
-		c.DB = NewPgSQLConnection(c.Config).Connect()
-	}
-
-	if c.DB == nil {
-		panic("unsupported driver")
-	}
-
-	return c.DB
-}
-
+// DataSource represents the data source configuration for a database connection
 func (c *Config) DataSource() *DataSource {
 	return &DataSource{
 		Dialect:  c.Driver,
@@ -73,6 +38,7 @@ func (c *Config) DataSource() *DataSource {
 	}
 }
 
+// DSN returns the Data Source Name (DSN) for the database connection
 func (c *Config) DSN() string {
 	dsn, err := c.DataSource().String()
 	if err != nil {
@@ -80,6 +46,11 @@ func (c *Config) DSN() string {
 	}
 
 	return dsn
+}
+
+// DSNWithError returns the Data Source Name (DSN) for the database connection and any error
+func (c *Config) DSNWithError() (string, error) {
+	return c.DataSource().String()
 }
 
 // DatabaseManager holds connections to various database instances
@@ -119,20 +90,20 @@ func (m *DatabaseManager) Get(name ...string) (*Connection, bool) {
 
 // Remove closes and removes a database connection from the manager
 func (m *DatabaseManager) Remove(name string) error {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-	conn, ok := m.Get(name)
-	if !ok {
-		return errors.New(fmt.Sprintf("database: not found %s", name))
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	conn, found := m.connections[name]
+	if !found {
+		return fmt.Errorf("%w: %s", ErrConnectionNotFound, name)
 	}
 
 	err := conn.Close()
-
 	if err != nil {
 		return err
 	}
-	delete(m.connections, name)
 
+	delete(m.connections, name)
 	return nil
 }
 
@@ -145,7 +116,7 @@ func (m *DatabaseManager) All() map[string]*Connection {
 
 // RemoveAll closes and removes all the existing connections
 func (m *DatabaseManager) RemoveAll() error {
-	for connName, _ := range m.All() {
+	for connName := range m.All() {
 		err := m.Remove(connName)
 		if err != nil {
 			return err
@@ -168,4 +139,21 @@ func Get(name ...string) *Connection {
 	}
 
 	return conn
+}
+
+// Conn sets the given connection for the QueryBuilder
+func (qb *QueryBuilder) Conn(connName ...string) *QueryBuilder {
+	qb.conn = Get(connName...)
+	return qb
+}
+
+// Query creates a new QueryBuilder instance with the specified connection
+func Query(connName ...string) *QueryBuilder {
+	conn := Get(connName...)
+	return NewQueryBuilder(conn)
+}
+
+// QueryFromConn creates a new QueryBuilder instance from an existing connection
+func QueryFromConn(conn *Connection) *QueryBuilder {
+	return NewQueryBuilder(conn)
 }

@@ -7,14 +7,7 @@ import (
 	"strings"
 )
 
-const (
-	DialectSQLite = "sqlite"
-	DialectMySQL  = "mysql"
-	DialectPgSQL  = "pgsql"
-)
-
 var (
-	supportedDialects     = []string{DialectSQLite, DialectMySQL, DialectPgSQL /*, "mssql"*/}
 	ErrUnsupportedDialect = errors.New("unsupported dialect")
 )
 
@@ -37,7 +30,7 @@ func (ds *DataSource) String() (string, error) {
 		return "", errors.New("Dialect is required")
 	}
 
-	if !slices.Contains(supportedDialects, dialect) {
+	if !slices.Contains(SupportedDialects, dialect) {
 		return "", ErrUnsupportedDialect
 	}
 
@@ -87,8 +80,8 @@ func (ds *DataSource) String() (string, error) {
 		return ds.getMysqlDSN(), nil
 	case DialectPgSQL:
 		return ds.getPostgresDSN(), nil
-	// case "mssql":
-	// 	return dsn.getMssqlDSN(), nil
+	case DialectMsSQL:
+		return ds.getMssqlDSN(), nil
 	default:
 		return "", ErrUnsupportedDialect
 	}
@@ -103,8 +96,11 @@ func (d *DataSource) validateParams(params string) error {
 	return errors.New("invalid params format")
 }
 
-// Example: file::memory:?cache=shared
+// Example: file:memdb1?mode=memory&cache=shared
 func (d *DataSource) getSqliteDSN() string {
+	if d.Name == "" {
+		return "file::memory:?" + d.Params
+	}
 	return "file:" + d.Name + "?" + d.Params
 }
 
@@ -149,6 +145,7 @@ func (d *DataSource) getPostgresDSN() string {
 	return hostStr + portStr + userStr + passStr + dbStr + paramsStr
 }
 
-// func (d *DSN) getMssqlDSN() string {
-// 	return "sqlserver://" + d.username + ":" + d.password + "@" + d.host + ":" + string(d.port) + "?database=" + d.name
-// }
+// Example: sqlserver://username:password@localhost:1433?database=test
+func (d *DataSource) getMssqlDSN() string {
+	return "sqlserver://" + d.Username + ":" + d.Password + "@" + d.Host + ":" + string(d.Port) + "?database=" + d.Name
+}

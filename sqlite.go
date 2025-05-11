@@ -10,15 +10,15 @@ func NewSQLiteConnection(config *Config) *SQLiteConnection {
 	return &SQLiteConnection{config: config}
 }
 
-func (c *SQLiteConnection) Connect() *sql.DB {
+func (c *SQLiteConnection) Connect() (*sql.DB, error) {
 	db, err := sql.Open("sqlite3", c.config.DSN())
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	if err := db.Ping(); err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return db
+	return db, nil
 }
