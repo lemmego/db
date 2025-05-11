@@ -1,7 +1,9 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -17,13 +19,14 @@ type Connection struct {
 	stdDb   *sql.DB
 	builder Builder
 	Error   error
+	tx      *sqlx.Tx
 }
 
 type CondFunc func(cond Cond) []string
 
 // NewConnection creates a new Connection with the provided config
 func NewConnection(config *Config) *Connection {
-	return &Connection{config, nil, nil, nil, nil}
+	return &Connection{Config: config, DB: nil, stdDb: nil, builder: nil, Error: nil, tx: nil}
 }
 
 // Db returns the standard sql.DB connection
@@ -57,4 +60,42 @@ func (c *Connection) Close() error {
 // Table creates a new query builder for the specified table
 func (c *Connection) Table(name string) *QueryBuilder {
 	return NewQueryBuilder(c).Table(name)
+}
+
+// BeginTx starts a new transaction
+func (c *Connection) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
+	if c.tx != nil {
+		return nil, errors.New("already in a transaction")
+	}
+	tx, err := c.DB.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.tx = tx
+	return tx, nil
+}
+
+// Commit commits the current transaction
+func (c *Connection) Commit() error {
+	if c.tx == nil {
+		return errors.New("not in a transaction")
+	}
+	err := c.tx.Commit()
+	c.tx = nil
+	return err
+}
+
+// Rollback rolls back the current transaction
+func (c *Connection) Rollback() error {
+	if c.tx == nil {
+		return errors.New("not in a transaction")
+	}
+	err := c.tx.Rollback()
+	c.tx = nil
+	return err
+}
+
+// InTransaction returns true if the connection is in a transaction
+func (c *Connection) InTransaction() bool {
+	return c.tx != nil
 }

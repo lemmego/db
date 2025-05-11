@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -598,4 +599,116 @@ func contains(slice interface{}, value interface{}) bool {
 		return v == value.(string)
 	}
 	return false
+}
+
+func TestTransaction(t *testing.T) {
+	setupDb(DialectSQLite)
+
+	// Test successful transaction
+	err := Query().Transaction(context.Background(), func(qb *QueryBuilder) error {
+		// Insert a user
+		_, err := qb.Table("users").Insert([]string{"name", "created_at"}, [][]any{
+			{"Transaction User", time.Now()},
+		}).Exec(context.Background())
+		if err != nil {
+			return err
+		}
+
+		// Update the user - ensure WHERE is after SET
+		_, err = qb.Table("users").
+			Update([]string{"name"}, [][]any{
+				{"Updated Transaction User"},
+			}).
+			Where(EQ("name", "Transaction User")).
+			Exec(context.Background())
+		return err
+	})
+
+	if err != nil {
+		t.Errorf("Transaction failed: %v", err)
+	}
+
+	// Verify the changes were committed
+	var users []User
+	err = Query().
+		Table("users").
+		Select("*").
+		Where(EQ("name", "Updated Transaction User")).
+		ScanAll(context.Background(), &users)
+	if err != nil {
+		t.Errorf("Failed to find updated user: %v", err)
+	}
+	if len(users) == 0 {
+		t.Error("Expected to find updated user")
+	}
+
+	// Test failed transaction
+	err = Query().Transaction(context.Background(), func(qb *QueryBuilder) error {
+		// Insert a user
+		_, err := qb.Table("users").Insert([]string{"name", "created_at"}, [][]any{
+			{"Failed Transaction User", time.Now()},
+		}).Exec(context.Background())
+		if err != nil {
+			return err
+		}
+
+		// Return an error to trigger rollback
+		return errors.New("intentional error")
+	})
+
+	if err == nil {
+		t.Error("Expected transaction to fail")
+	}
+
+	// Verify the changes were rolled back
+	var failedUsers []User
+	err = Query().
+		Table("users").
+		Select("*").
+		Where(EQ("name", "Failed Transaction User")).
+		ScanAll(context.Background(), &failedUsers)
+	if err != nil {
+		t.Errorf("Failed to query for rolled back user: %v", err)
+	}
+	if len(failedUsers) > 0 {
+		t.Error("Expected user to not exist due to rollback")
+	}
+
+	// Test panic recovery
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Expected panic to be thrown")
+			} else if r != "intentional panic" {
+				t.Errorf("Expected panic 'intentional panic', got '%v'", r)
+			}
+		}()
+
+		_ = Query().Transaction(context.Background(), func(qb *QueryBuilder) error {
+			// Insert a user
+			_, err := qb.Table("users").Insert([]string{"name", "created_at"}, [][]any{
+				{"Panic User", time.Now()},
+			}).Exec(context.Background())
+			if err != nil {
+				return err
+			}
+
+			// Trigger a panic
+			panic("intentional panic")
+		})
+	}()
+
+	// Verify the changes were rolled back
+	var panicUsers []User
+	err = Query().
+		Table("users").
+		Select("*").
+		Where(EQ("name", "Panic User")).
+		ScanAll(context.Background(), &panicUsers)
+	if err != nil {
+		t.Errorf("Failed to query for panic rolled back user: %v", err)
+	}
+	if len(panicUsers) > 0 {
+		t.Error("Expected user to not exist due to panic rollback")
+	}
 }

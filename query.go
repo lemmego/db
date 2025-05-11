@@ -161,10 +161,14 @@ func (qb *QueryBuilder) Insert(cols []string, values [][]any) *QueryBuilder {
 // Update sets the UPDATE clause for the query builder.
 func (qb *QueryBuilder) Update(cols []string, values [][]any) *QueryBuilder {
 	ub := UpdateBuilder(qb.conn.ConnName)
-	qb.builder.(*BuilderUpdate).Update(qb.tableName)
-	//for i, col := range cols {
-	//qb.builder.(*BuilderUpdate).Set(col, values[i])
-	//}
+	ub.Update(qb.tableName)
+	if len(values) > 0 {
+		assignments := make([]string, len(cols))
+		for i, col := range cols {
+			assignments[i] = ub.Assign(col, values[0][i])
+		}
+		ub.Set(assignments...)
+	}
 	qb.SetBuilder(ub)
 	return qb
 }
@@ -311,7 +315,16 @@ func (qb *QueryBuilder) Fetch(ctx context.Context) ([]map[string]interface{}, er
 		pp.Println(sqlStmt, args)
 	}
 
-	rows, err := qb.conn.QueryContext(ctx, sqlStmt, args...)
+	var rows *sql.Rows
+	var err error
+
+	// If we're in a transaction, use the transaction context
+	if qb.conn.InTransaction() {
+		rows, err = qb.conn.tx.QueryContext(ctx, sqlStmt, args...)
+	} else {
+		rows, err = qb.conn.QueryContext(ctx, sqlStmt, args...)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +384,11 @@ func (qb *QueryBuilder) Scan(ctx context.Context, dest interface{}) error {
 		pp.Println(query, args)
 	}
 
+	// If we're in a transaction, use the transaction context
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.GetContext(ctx, dest, query, args...)
+	}
+
 	return qb.conn.GetContext(ctx, dest, query, args...)
 }
 
@@ -385,6 +403,11 @@ func (qb *QueryBuilder) ScanAll(ctx context.Context, dest interface{}) error {
 		pp.Println(query, args)
 	}
 
+	// If we're in a transaction, use the transaction context
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.SelectContext(ctx, dest, query, args...)
+	}
+
 	return qb.conn.SelectContext(ctx, dest, query, args...)
 }
 
@@ -393,6 +416,11 @@ func (qb *QueryBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	query, args := qb.builder.Build()
 	if qb.debug {
 		pp.Println(query, args)
+	}
+
+	// If we're in a transaction, use the transaction context
+	if qb.conn.InTransaction() {
+		return qb.conn.tx.ExecContext(ctx, query, args...)
 	}
 
 	return qb.conn.ExecContext(ctx, query, args...)
@@ -491,4 +519,61 @@ func (qb *QueryBuilder) Cursor(cursor string, direction string, cursorField stri
 	}
 
 	return qb.Limit(1)
+}
+
+// Begin starts a new transaction.
+func (qb *QueryBuilder) Begin(ctx context.Context) (*QueryBuilder, error) {
+	_, err := qb.conn.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new QueryBuilder with the same connection and transaction
+	txQB := &QueryBuilder{
+		conn:      qb.conn,
+		builder:   qb.builder,
+		tableName: qb.tableName,
+		debug:     qb.debug,
+	}
+
+	return txQB, nil
+}
+
+// Commit commits the transaction.
+func (qb *QueryBuilder) Commit() error {
+	return qb.conn.Commit()
+}
+
+// Rollback rolls back the transaction.
+func (qb *QueryBuilder) Rollback() error {
+	return qb.conn.Rollback()
+}
+
+// Transaction executes the given function within a transaction.
+// If the function returns an error, the transaction is rolled back.
+// Otherwise, the transaction is committed.
+func (qb *QueryBuilder) Transaction(ctx context.Context, fn func(*QueryBuilder) error) error {
+	txQB, err := qb.Begin(ctx)
+	if err != nil {
+		return err
+	}
+
+	var txErr error
+	defer func() {
+		if p := recover(); p != nil {
+			// A panic occurred, rollback and repanic
+			_ = txQB.conn.Rollback()
+			// Re-throw the panic
+			panic(p)
+		} else if txErr != nil {
+			// Something went wrong, rollback
+			_ = txQB.conn.Rollback()
+		} else {
+			// All good, commit
+			txErr = txQB.conn.Commit()
+		}
+	}()
+
+	txErr = fn(txQB)
+	return txErr
 }
