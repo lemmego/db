@@ -340,3 +340,97 @@ func TestDelete(t *testing.T) {
 		t.Errorf("Users should have 2 rows")
 	}
 }
+
+func TestPage(t *testing.T) {
+	setupDb(DialectSQLite)
+
+	// Insert test data
+	_, err := Query().Table("users").Insert([]string{"id", "name", "created_at"}, [][]any{
+		{1, "John Doe", time.Now()},
+		{2, "Jane Doe", time.Now()},
+		{3, "James Doe", time.Now()},
+		{4, "Alice Smith", time.Now()},
+		{5, "Bob Smith", time.Now()},
+	}).Exec(context.Background())
+
+	if err != nil {
+		t.Fatalf("Failed to insert test data: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		page     int
+		perPage  int
+		expected int // expected number of results
+	}{
+		{
+			name:     "first page with 2 items",
+			page:     1,
+			perPage:  2,
+			expected: 2,
+		},
+		{
+			name:     "second page with 2 items",
+			page:     2,
+			perPage:  2,
+			expected: 2,
+		},
+		{
+			name:     "third page with 2 items",
+			page:     3,
+			perPage:  2,
+			expected: 1,
+		},
+		{
+			name:     "zero page defaults to first page",
+			page:     0,
+			perPage:  2,
+			expected: 2,
+		},
+		{
+			name:     "negative page defaults to first page",
+			page:     -1,
+			perPage:  2,
+			expected: 2,
+		},
+		{
+			name:     "zero perPage defaults to 10",
+			page:     1,
+			perPage:  0,
+			expected: 5,
+		},
+		{
+			name:     "negative perPage defaults to 10",
+			page:     1,
+			perPage:  -5,
+			expected: 5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var users []User
+			err := Query().
+				Table("users").
+				Select("*").
+				Page(tt.page, tt.perPage).
+				ScanAll(context.Background(), &users)
+
+			if err != nil {
+				t.Errorf("Failed to execute query: %v", err)
+			}
+
+			if len(users) != tt.expected {
+				t.Errorf("Expected %d users, got %d", tt.expected, len(users))
+			}
+
+			// For non-default pages, verify the correct items are returned
+			if tt.page > 0 && tt.perPage > 0 {
+				expectedStartID := (tt.page-1)*tt.perPage + 1
+				if len(users) > 0 && users[0].ID != uint64(expectedStartID) {
+					t.Errorf("Expected first user ID to be %d, got %d", expectedStartID, users[0].ID)
+				}
+			}
+		})
+	}
+}

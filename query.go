@@ -444,3 +444,39 @@ func DeleteBuilder(connName ...string) *BuilderDelete {
 	flavor := getBuilderForDialect(conn.Config.Driver)
 	return &BuilderDelete{flavor.NewDeleteBuilder()}
 }
+
+// Page adds pagination to the query using offset-based pagination.
+// page is 1-based, perPage is the number of items per page.
+func (qb *QueryBuilder) Page(page, perPage int) *QueryBuilder {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 10
+	}
+
+	offset := (page - 1) * perPage
+	return qb.Limit(perPage).Offset(offset)
+}
+
+// Cursor adds cursor-based pagination to the query.
+// cursor is the value of the cursor field, direction is "next" or "prev",
+// and cursorField is the field to use for cursor-based pagination.
+func (qb *QueryBuilder) Cursor(cursor string, direction string, cursorField string) *QueryBuilder {
+	if cursor == "" {
+		return qb.Limit(1)
+	}
+
+	switch direction {
+	case "next":
+		qb.Where(func(b Builder) string {
+			return b.(Cond).GreaterThan(cursorField, cursor)
+		})
+	case "prev":
+		qb.Where(func(b Builder) string {
+			return b.(Cond).LessThan(cursorField, cursor)
+		})
+	}
+
+	return qb.Limit(1)
+}
