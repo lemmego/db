@@ -299,7 +299,7 @@ func (qb *QueryBuilder) Build() (string, []any) {
 }
 
 // Where adds a WHERE clause to the query
-func (qb *QueryBuilder) Where(condition ConditionFunc) *QueryBuilder {
+func (qb *QueryBuilder) Where(conditions ...ConditionFunc) *QueryBuilder {
 	if qb.builder == nil {
 		switch qb.queryType {
 		case "SELECT":
@@ -312,14 +312,18 @@ func (qb *QueryBuilder) Where(condition ConditionFunc) *QueryBuilder {
 			qb.builder = SelectBuilder(qb.conn.ConnName)
 		}
 	}
+	conditionsStr := make([]string, len(conditions))
+	for i, cond := range conditions {
+		conditionsStr[i] = cond(qb.builder)
+	}
 	// Call the builder's Where method
 	switch b := qb.builder.(type) {
 	case *BuilderSelect:
-		b.Where(condition(qb.builder))
+		b.Where(conditionsStr...)
 	case *BuilderUpdate:
-		b.Where(condition(qb.builder))
+		b.Where(conditionsStr...)
 	case *BuilderDelete:
-		b.Where(condition(qb.builder))
+		b.Where(conditionsStr...)
 	}
 	return qb
 }

@@ -1083,3 +1083,170 @@ func TestBuild(t *testing.T) {
 		})
 	}
 }
+
+func TestWhere(t *testing.T) {
+	tests := []struct {
+		name          string
+		setup         func(*QueryBuilder)
+		expectedSQL   string
+		expectedArgs  []interface{}
+		expectedError bool
+	}{
+		{
+			name: "simple where with equal",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Equal("id", 1))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE id = ?",
+			expectedArgs:  []interface{}{1},
+			expectedError: false,
+		},
+		{
+			name: "where with multiple conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(And(
+						Equal("id", 1)(qb.builder),
+						Equal("name", "John")(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (id = ? AND name = ?)",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "where with OR conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Or(
+						Equal("id", 1)(qb.builder),
+						Equal("name", "John")(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (id = ? OR name = ?)",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "where with complex conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(And(
+						GreaterThan("age", 18)(qb.builder),
+						Or(
+							Equal("status", "active")(qb.builder),
+							Equal("status", "pending")(qb.builder),
+						)(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (age > ? AND (status = ? OR status = ?))",
+			expectedArgs:  []interface{}{18, "active", "pending"},
+			expectedError: false,
+		},
+		{
+			name: "where with LIKE condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Like("name", "John%"))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE name LIKE ?",
+			expectedArgs:  []interface{}{"John%"},
+			expectedError: false,
+		},
+		{
+			name: "where with IN condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(In("id", 1, 2, 3))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE id IN (?, ?, ?)",
+			expectedArgs:  []interface{}{1, 2, 3},
+			expectedError: false,
+		},
+		{
+			name: "where with BETWEEN condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Between("age", 18, 65))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE age BETWEEN ? AND ?",
+			expectedArgs:  []interface{}{18, 65},
+			expectedError: false,
+		},
+		{
+			name: "where with IS NULL condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(IsNull("deleted_at"))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE deleted_at IS NULL",
+			expectedArgs:  nil,
+			expectedError: false,
+		},
+		{
+			name: "where with multiple AND conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(And(
+						Equal("status", "active")(qb.builder),
+						GreaterThan("age", 18)(qb.builder),
+						Like("email", "%@example.com")(qb.builder),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (status = ? AND age > ? AND email LIKE ?)",
+			expectedArgs:  []interface{}{"active", 18, "%@example.com"},
+			expectedError: false,
+		},
+		{
+			name: "where with NOT condition",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(Not(Equal("status", "inactive")(qb.builder)))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE NOT status = ?",
+			expectedArgs:  []interface{}{"inactive"},
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := setupDb(DialectSQLite)
+			defer conn.Close()
+			qb := NewQueryBuilder(conn)
+			tt.setup(qb)
+
+			sql, args := qb.Build()
+			if tt.expectedError {
+				t.Errorf("expected error but got none")
+				return
+			}
+
+			if sql != tt.expectedSQL {
+				t.Errorf("expected SQL %q, got %q", tt.expectedSQL, sql)
+			}
+
+			if len(args) != len(tt.expectedArgs) {
+				t.Errorf("expected %d args, got %d", len(tt.expectedArgs), len(args))
+				return
+			}
+
+			for i, arg := range args {
+				if arg != tt.expectedArgs[i] {
+					t.Errorf("expected arg[%d] to be %v, got %v", i, tt.expectedArgs[i], arg)
+				}
+			}
+		})
+	}
+}
