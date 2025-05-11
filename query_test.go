@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k0kubun/pp/v3"
-
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -199,8 +197,6 @@ func TestModels(t *testing.T) {
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-
-	pp.Print(users)
 }
 
 func TestInsertBuilder(t *testing.T) {
@@ -306,8 +302,6 @@ func TestUpdateBuilder(t *testing.T) {
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-
-	pp.Print(users)
 }
 
 func TestDeleteBuilder(t *testing.T) {
@@ -346,8 +340,6 @@ func TestDeleteBuilder(t *testing.T) {
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-
-	pp.Print(users)
 
 	if len(users) != 2 {
 		t.Errorf("Users should have 2 rows")
@@ -625,9 +617,7 @@ func TestTransaction(t *testing.T) {
 
 		// Update the user - ensure WHERE is after SET
 		_, err = qb.Table("users").
-			Update([]string{"name"}, [][]any{
-				{"Updated Transaction User"},
-			}).
+			Update([]string{"name"}, []any{"Updated Transaction User"}).
 			Where(EQ("name", "Transaction User")).
 			Exec(context.Background())
 		return err
@@ -734,7 +724,7 @@ func TestUpdate(t *testing.T) {
 			name: "simple update",
 			update: func(qb *QueryBuilder) error {
 				_, err := qb.Table("users").
-					Update([]string{"name"}, [][]any{{"Updated Name"}}).
+					Update([]string{"name"}, []any{"Updated Name"}).
 					Where(EQ("name", "John Doe")).
 					Exec(context.Background())
 				return err
@@ -747,7 +737,7 @@ func TestUpdate(t *testing.T) {
 			name: "update multiple rows",
 			update: func(qb *QueryBuilder) error {
 				_, err := qb.Table("users").
-					Update([]string{"name"}, [][]any{{"Multiple Updated"}}).
+					Update([]string{"name"}, []any{"Multiple Updated"}).
 					Where(OrCond(
 						EQ("name", "Jane Doe"),
 						EQ("name", "James Doe"),
@@ -765,7 +755,7 @@ func TestUpdate(t *testing.T) {
 				return qb.Transaction(context.Background(), func(txQB *QueryBuilder) error {
 					// First update
 					_, err := txQB.Table("users").
-						Update([]string{"name"}, [][]any{{"Transaction Update 1"}}).
+						Update([]string{"name"}, []any{"Transaction Update 1"}).
 						Where(EQ("name", "John Doe")).
 						Exec(context.Background())
 					if err != nil {
@@ -774,7 +764,7 @@ func TestUpdate(t *testing.T) {
 
 					// Second update
 					_, err = txQB.Table("users").
-						Update([]string{"name"}, [][]any{{"Transaction Update 2"}}).
+						Update([]string{"name"}, []any{"Transaction Update 2"}).
 						Where(EQ("name", "Jane Doe")).
 						Exec(context.Background())
 					return err
@@ -790,7 +780,7 @@ func TestUpdate(t *testing.T) {
 				return qb.Transaction(context.Background(), func(txQB *QueryBuilder) error {
 					// First update
 					_, err := txQB.Table("users").
-						Update([]string{"name"}, [][]any{{"Failed Update"}}).
+						Update([]string{"name"}, []any{"Failed Update"}).
 						Where(EQ("name", "John Doe")).
 						Exec(context.Background())
 					if err != nil {
@@ -809,7 +799,7 @@ func TestUpdate(t *testing.T) {
 			name: "update with invalid column",
 			update: func(qb *QueryBuilder) error {
 				_, err := qb.Table("users").
-					Update([]string{"invalid_column"}, [][]any{{"Invalid Update"}}).
+					Update([]string{"invalid_column"}, []any{"Invalid Update"}).
 					Where(EQ("name", "John Doe")).
 					Exec(context.Background())
 				return err
@@ -920,7 +910,7 @@ func TestBuild(t *testing.T) {
 			name: "simple update",
 			setup: func(qb *QueryBuilder) {
 				qb.Table("users").
-					Update([]string{"name"}, [][]any{{"John"}}).
+					Update([]string{"name"}, []any{"John"}).
 					Where(EQ("id", 1))
 			},
 			expectedSQL:   "UPDATE users SET name = ? WHERE id = ?",
@@ -931,7 +921,7 @@ func TestBuild(t *testing.T) {
 			name: "update multiple columns",
 			setup: func(qb *QueryBuilder) {
 				qb.Table("users").
-					Update([]string{"name", "email"}, [][]any{{"John", "john@example.com"}}).
+					Update([]string{"name", "email"}, []any{"John", "john@example.com"}).
 					Where(EQ("id", 1))
 			},
 			expectedSQL:   "UPDATE users SET name = ?, email = ? WHERE id = ?",

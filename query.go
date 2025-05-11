@@ -66,7 +66,7 @@ type QueryBuilder struct {
 	queryType     string
 	selectColumns []string
 	updateColumns []string
-	updateValues  [][]any
+	updateValues  []any
 	insertColumns []string
 	insertValues  [][]any
 }
@@ -155,7 +155,7 @@ func (qb *QueryBuilder) Insert(columns []string, values [][]any) *QueryBuilder {
 }
 
 // Update sets up an UPDATE query
-func (qb *QueryBuilder) Update(columns []string, values [][]any) *QueryBuilder {
+func (qb *QueryBuilder) Update(columns []string, values []any) *QueryBuilder {
 	qb.queryType = "UPDATE"
 	qb.builder = UpdateBuilder(qb.conn.ConnName)
 	qb.updateColumns = columns
@@ -265,7 +265,7 @@ func (qb *QueryBuilder) Build() (string, []any) {
 		if len(qb.updateColumns) > 0 && len(qb.updateValues) > 0 {
 			assignments := make([]string, len(qb.updateColumns))
 			for i, col := range qb.updateColumns {
-				assignments[i] = ub.Assign(col, qb.updateValues[0][i])
+				assignments[i] = ub.Assign(col, qb.updateValues[i])
 			}
 			ub.Set(assignments...)
 		}
