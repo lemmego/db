@@ -872,3 +872,176 @@ func TestUpdate(t *testing.T) {
 		})
 	}
 }
+
+func TestBuild(t *testing.T) {
+	tests := []struct {
+		name          string
+		setup         func(*QueryBuilder)
+		expectedSQL   string
+		expectedArgs  []interface{}
+		expectedError bool
+	}{
+		{
+			name: "simple select",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("id", "name").
+					Where(EQ("id", 1))
+			},
+			expectedSQL:   "SELECT id, name FROM users WHERE id = ?",
+			expectedArgs:  []interface{}{1},
+			expectedError: false,
+		},
+		{
+			name: "select with multiple conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					Where(OrCond(
+						EQ("id", 1),
+						EQ("name", "John"),
+					))
+			},
+			expectedSQL:   "SELECT * FROM users WHERE (id = ? OR name = ?)",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "select with order and limit",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("*").
+					OrderBy("id DESC").
+					Limit(10)
+			},
+			expectedSQL:   "SELECT * FROM users ORDER BY id DESC LIMIT 10",
+			expectedArgs:  nil,
+			expectedError: false,
+		},
+		{
+			name: "simple update",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Update([]string{"name"}, [][]any{{"John"}}).
+					Where(EQ("id", 1))
+			},
+			expectedSQL:   "UPDATE users SET name = ? WHERE id = ?",
+			expectedArgs:  []interface{}{"John", 1},
+			expectedError: false,
+		},
+		{
+			name: "update multiple columns",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Update([]string{"name", "email"}, [][]any{{"John", "john@example.com"}}).
+					Where(EQ("id", 1))
+			},
+			expectedSQL:   "UPDATE users SET name = ?, email = ? WHERE id = ?",
+			expectedArgs:  []interface{}{"John", "john@example.com", 1},
+			expectedError: false,
+		},
+		{
+			name: "simple delete",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Delete().
+					Where(EQ("id", 1))
+			},
+			expectedSQL:   "DELETE FROM users WHERE id = ?",
+			expectedArgs:  []interface{}{1},
+			expectedError: false,
+		},
+		{
+			name: "delete with multiple conditions",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Delete().
+					Where(OrCond(
+						EQ("id", 1),
+						EQ("name", "John"),
+					))
+			},
+			expectedSQL:   "DELETE FROM users WHERE (id = ? OR name = ?)",
+			expectedArgs:  []interface{}{1, "John"},
+			expectedError: false,
+		},
+		{
+			name: "simple insert",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Insert([]string{"name", "email"}, [][]any{{"John", "john@example.com"}})
+			},
+			expectedSQL:   "INSERT INTO users (name, email) VALUES (?, ?)",
+			expectedArgs:  []interface{}{"John", "john@example.com"},
+			expectedError: false,
+		},
+		{
+			name: "insert multiple rows",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Insert([]string{"name", "email"}, [][]any{
+						{"John", "john@example.com"},
+						{"Jane", "jane@example.com"},
+					})
+			},
+			expectedSQL:   "INSERT INTO users (name, email) VALUES (?, ?), (?, ?)",
+			expectedArgs:  []interface{}{"John", "john@example.com", "Jane", "jane@example.com"},
+			expectedError: false,
+		},
+		{
+			name: "select with join",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("users.id", "users.name", "posts.title").
+					Join("posts", "users.id = posts.user_id").
+					Where(EQ("users.id", 1))
+			},
+			expectedSQL:   "SELECT users.id, users.name, posts.title FROM users JOIN posts ON users.id = posts.user_id WHERE users.id = ?",
+			expectedArgs:  []interface{}{1},
+			expectedError: false,
+		},
+		{
+			name: "select with group by and having",
+			setup: func(qb *QueryBuilder) {
+				qb.Table("users").
+					Select("name", "COUNT(*) as count").
+					GroupBy("name").
+					Having(GT("count", 1))
+			},
+			expectedSQL:   "SELECT name, COUNT(*) as count FROM users GROUP BY name HAVING count > ?",
+			expectedArgs:  []interface{}{1},
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := setupDb(DialectSQLite)
+			defer conn.Close()
+
+			qb := conn.Table("users")
+			tt.setup(qb)
+
+			sql, args := qb.Build()
+
+			// Normalize SQL for comparison by removing extra spaces
+			sql = strings.Join(strings.Fields(sql), " ")
+			expectedSQL := strings.Join(strings.Fields(tt.expectedSQL), " ")
+
+			if sql != expectedSQL {
+				t.Errorf("SQL mismatch:\nExpected: %s\nGot:      %s", expectedSQL, sql)
+			}
+
+			if len(args) != len(tt.expectedArgs) {
+				t.Errorf("Args length mismatch: expected %d, got %d", len(tt.expectedArgs), len(args))
+				return
+			}
+
+			for i, arg := range args {
+				if arg != tt.expectedArgs[i] {
+					t.Errorf("Arg[%d] mismatch: expected %v, got %v", i, tt.expectedArgs[i], arg)
+				}
+			}
+		})
+	}
+}

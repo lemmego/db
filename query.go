@@ -612,5 +612,8 @@ func (qb *QueryBuilder) Transaction(ctx context.Context, fn func(*QueryBuilder) 
 func (qb *QueryBuilder) Delete() *QueryBuilder {
 	qb.queryType = "DELETE"
 	qb.builder = DeleteBuilder(qb.conn.ConnName)
+	if qb.tableName != "" {
+		qb.builder.(*BuilderDelete).DeleteFrom(qb.tableName)
+	}
 	return qb
 }
